@@ -921,33 +921,28 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         lots = max(1, math.floor((payload.capital * sizing) / (ltp * lot)))
         qty = lots * lot
 
-        # Merge with existing position if any
-        merged = False
-        for p in doc["positions"]:
-            if p.get("trading_symbol") == fake_symbol:
-                old_qty = int(p.get("net_quantity") or 0)
-                old_avg = float(p.get("average_price") or 0)
-                new_qty = old_qty + qty
-                p["average_price"] = round((old_avg * old_qty + ltp * qty) / max(1, new_qty), 2)
-                p["net_quantity"] = new_qty
-                p["last_price"] = ltp
-                merged = True
-                break
-        if not merged:
-            doc["positions"].append({
-                "trading_symbol": fake_symbol,
-                "exchange": "NSE",
-                "product": "NRML",
-                "net_quantity": qty,
-                "average_price": ltp,
-                "last_price": ltp,
-                "transaction_type": "BUY",
-                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            })
+        # Each trade is recorded as its own position row — Groww-style.
+        # We never merge with an existing row, so the user can track every
+        # entry independently. Append a small disambiguator to the symbol
+        # so duplicates with the same strike remain distinct in the UI.
+        suffix_count = sum(
+            1 for p in doc["positions"] if (p.get("trading_symbol") or "").startswith(fake_symbol)
+        )
+        unique_symbol = fake_symbol if suffix_count == 0 else f"{fake_symbol}#{suffix_count + 1}"
+        doc["positions"].append({
+            "trading_symbol": unique_symbol,
+            "exchange": "NSE",
+            "product": "NRML",
+            "net_quantity": qty,
+            "average_price": ltp,
+            "last_price": ltp,
+            "transaction_type": "BUY",
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        })
         order_id = f"demo-{uuid.uuid4().hex[:8]}"
         doc.setdefault("orders", []).append({
             "order_id": order_id,
-            "trading_symbol": fake_symbol,
+            "trading_symbol": unique_symbol,
             "transaction_type": "BUY",
             "order_status": "EXECUTED",
             "quantity": qty,
@@ -958,11 +953,11 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         })
         await _save_demo_state(token, doc)
         return {
-            "selected": {"trading_symbol": fake_symbol, "strike": strike, "ltp": ltp},
+            "selected": {"trading_symbol": unique_symbol, "strike": strike, "ltp": ltp},
             "quantity": qty,
             "lots": lots,
             "lot_size": lot,
-            "order": {"trading_symbol": fake_symbol, "transaction_type": "BUY", "order_type": (preset_doc or {}).get("order_type", "MARKET")},
+            "order": {"trading_symbol": unique_symbol, "transaction_type": "BUY", "order_type": (preset_doc or {}).get("order_type", "MARKET")},
             "response": {"order_id": order_id, "status": "EXECUTED"},
             "demo": True,
         }

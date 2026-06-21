@@ -187,6 +187,15 @@ export default function Home() {
       let mounted = true;
       (async () => {
         setLoading(true);
+        try {
+          // Refresh settings every time we focus the screen so toggles like
+          // "Convert to USD" or "Save last underlying" take effect immediately
+          // when the user returns from the Settings screen.
+          const s = await api.settings();
+          if (mounted) setSettings(s);
+        } catch {
+          // ignore — keep prior settings
+        }
         await loadAll();
         if (mounted) setLoading(false);
       })();
