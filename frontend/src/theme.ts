@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 /**
  * Color palette derived from /app/design_guidelines.json
  */
@@ -19,7 +21,8 @@ export const Colors = {
   pillBg: "#F3F4F6",
 };
 
-export const FONT = "Arial";
+// Device-native typography: SF on iOS, Roboto on Android, system default on web.
+export const FONT = Platform.select({ ios: "System", android: "Roboto", default: undefined }) as string | undefined;
 
 export const fontStyle = (weight: "normal" | "bold" = "normal") => ({
   fontFamily: FONT,

@@ -941,7 +941,7 @@ const styles = StyleSheet.create({
   exitAll: { backgroundColor: Colors.danger, marginTop: 4 },
   exitText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", fontSize: 12, letterSpacing: 0.6 },
 
-  menuBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
+  menuBackdrop: { flex: 1, backgroundColor: "transparent" },
   menuPanel: {
     marginTop: 48,
     marginRight: 12,

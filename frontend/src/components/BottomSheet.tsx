@@ -52,7 +52,7 @@ export default function BottomSheet({ visible, onClose, children, avoidKeyboard 
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
+  backdrop: { flex: 1, backgroundColor: "transparent" },
   sheetBg: { backgroundColor: "#FFFFFF" },
   sheet: {
     backgroundColor: "#FFFFFF",
