@@ -633,12 +633,29 @@ async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(
     now = datetime.now(timezone.utc)
     all_dates: List[str] = []
     errors: List[str] = []
+    raw_samples: List[Any] = []
     for year in (now.year, now.year + 1):
         try:
             data = await _call_blocking(api_.get_expiries, exchange, underlying, year)
+            raw_samples.append(data)
             all_dates.extend(_extract_iso_dates(data))
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{year}: {exc}")
+    # Always log the raw shape — invaluable when Groww changes the response
+    # schema. Truncate to keep logs sane.
+    try:
+        sample_repr = str(raw_samples)[:500]
+    except Exception:  # noqa: BLE001
+        sample_repr = "<unreprable>"
+    logger.info(
+        "groww.expiries underlying=%s exchange=%s years=%s errors=%s extracted=%d sample=%s",
+        underlying,
+        exchange,
+        (now.year, now.year + 1),
+        errors,
+        len(all_dates),
+        sample_repr,
+    )
     if not all_dates and errors:
         raise HTTPException(status_code=502, detail="; ".join(errors))
     today_iso = now.date().isoformat()

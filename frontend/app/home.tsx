@@ -136,17 +136,18 @@ export default function Home() {
         : "NSE";
       const res = await api.expiries(u, exch);
       const raw: string[] = res?.expiries || res?.data || res?.items || [];
-      // Keep only today + future ISO dates (compare YYYY-MM-DD lexicographically).
       const todayIso = new Date().toISOString().slice(0, 10);
       const exp = (Array.isArray(raw) ? raw : [])
         .filter((d) => typeof d === "string" && d >= todayIso)
         .sort();
       setExpiryList(exp);
-      if (exp.length && !expiry) setExpiry(exp[0]);
+      // Reset the selected expiry if the previous one is no longer valid
+      // (e.g., it expired, or the schedule changed).
+      setExpiry((cur) => (cur && exp.includes(cur) ? cur : exp[0] ?? null));
     } catch {
       setExpiryList([]);
     }
-  }, [expiry]);
+  }, []);
 
   const loadAll = useCallback(async () => {
     setError(null);
