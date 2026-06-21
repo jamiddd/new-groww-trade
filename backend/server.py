@@ -269,24 +269,31 @@ def _demo_orders() -> Dict[str, Any]:
 
 
 def _demo_expiries() -> Dict[str, Any]:
-    """Return ~8 weekly + 4 monthly expiries (Thursday rolls)."""
+    """Return ~8 weekly + 4 monthly expiries.
+
+    NSE moved the NIFTY weekly expiry to Tuesdays in early 2025 (SEBI
+    rationalization). We model that here. The fallback works for any other
+    underlying too since the next Tuesday is always a valid choice in demo
+    mode.
+    """
     today = datetime.now(timezone.utc).date()
-    days_ahead = (3 - today.weekday()) % 7  # next Thursday
-    out = []
-    # 8 weeklies
+    # Days until the upcoming Tuesday (weekday == 1). 0 means today *is* Tue.
+    days_ahead = (1 - today.weekday()) % 7
+    out: List[str] = []
+    # 8 Tuesday weeklies starting from this week's Tuesday (or today if Tue).
     for w in range(8):
         d = today + timedelta(days=days_ahead + 7 * w)
         out.append(d.isoformat())
-    # 4 additional monthlies — last Thursday of the next 4 months after weeklies end
+
+    # 4 additional monthlies — last Tuesday of months further out.
     from calendar import monthrange
     base = today.replace(day=1)
     for m in range(2, 6):
         year = base.year + (base.month - 1 + m) // 12
         month = (base.month - 1 + m) % 12 + 1
         last_day = monthrange(year, month)[1]
-        # walk back to last Thursday
         d = datetime(year, month, last_day).date()
-        while d.weekday() != 3:
+        while d.weekday() != 1:  # walk back to last Tuesday
             d -= timedelta(days=1)
         iso = d.isoformat()
         if iso not in out:
