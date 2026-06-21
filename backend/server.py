@@ -907,17 +907,32 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     # Demo mode: stateful — actually mutate db.demo_state
     if _is_demo(token):
         doc = await _demo_state_for(token)
-        # Pick a synthetic strike around 24700 ± 50*offset
-        atm = 24700
-        offsets = {"ATM": 0, "OTM1": 50, "OTM2": 100, "ITM1": -50, "HIGH_GAMMA": 0}
-        # Find preset config for sizing
+        # Approximate ATM for the selected underlying. Real ATM comes from
+        # the live option chain; demo uses a sensible spot per symbol so
+        # different underlyings produce realistic-looking trading symbols.
+        atm_map = {
+            "NIFTY": 24700,
+            "BANKNIFTY": 51100,
+            "FINNIFTY": 23400,
+            "MIDCPNIFTY": 12100,
+            "SENSEX": 81500,
+            "BANKEX": 58000,
+        }
+        atm_step_map = {
+            "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
+            "MIDCPNIFTY": 50, "SENSEX": 100, "BANKEX": 100,
+        }
+        u = (payload.underlying or "NIFTY").upper()
+        atm = atm_map.get(u, 1000)
+        step = atm_step_map.get(u, 50)
+        offsets = {"ATM": 0, "OTM1": step, "OTM2": 2 * step, "ITM1": -step, "HIGH_GAMMA": 0}
         preset_doc = await db.presets.find_one({"key": payload.preset_key}, {"_id": 0})
         sizing = float(((preset_doc or {}).get("position_sizing_pct") or 25)) / 100.0
         strike_off = offsets.get((preset_doc or {}).get("strike_selection", "ATM"), 0)
         strike = atm + strike_off if payload.option_type == "CE" else atm - strike_off
-        fake_symbol = f"NIFTY{strike}{payload.option_type}"
+        fake_symbol = f"{u}{strike}{payload.option_type}"
         ltp = round(random.uniform(80, 200), 2)
-        lot = 75
+        lot = 75 if u == "NIFTY" else (35 if u == "BANKNIFTY" else 50)
         lots = max(1, math.floor((payload.capital * sizing) / (ltp * lot)))
         qty = lots * lot
 
