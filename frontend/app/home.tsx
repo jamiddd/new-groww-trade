@@ -91,6 +91,8 @@ export default function Home() {
   const [expirySheetVisible, setExpirySheetVisible] = useState(false);
   const [confirmPreset, setConfirmPreset] = useState<PresetSummary | null>(null);
   const [confirmExit, setConfirmExit] = useState<25 | 50 | 100 | null>(null);
+  const [singlePos, setSinglePos] = useState<Position | null>(null);
+  const [posMenuVisible, setPosMenuVisible] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -264,12 +266,20 @@ export default function Home() {
     }
   };
 
-  const doExit = async (pct: 25 | 50 | 100) => {
+  const doExit = async (
+    pct: 25 | 50 | 100,
+    opts: { trading_symbol?: string; pnl_filter?: "positive" | "negative" } = {},
+  ) => {
     setConfirmExit(null);
     setPlacing(true);
     try {
-      const res = await api.exit(pct);
-      showToast(`Exited ${res?.count ?? 0} positions (${pct}%)`);
+      const res = await api.exit({ percent: pct, ...opts });
+      const label = opts.trading_symbol
+        ? opts.trading_symbol
+        : opts.pnl_filter
+        ? `${opts.pnl_filter} positions`
+        : `${pct}%`;
+      showToast(`Exited ${res?.count ?? 0} (${label})`);
       await loadAll();
     } catch (e: any) {
       showToast(`Exit failed: ${e?.message ?? "error"}`);
@@ -393,10 +403,19 @@ export default function Home() {
         {/* Positions */}
         <View style={styles.posHeader}>
           <Text style={styles.posTitle}>Positions ({positions.length}):</Text>
-          <Text style={[styles.posTotal, { color: pnlColor(totalPnl) }]}>
-            {pnlSign(totalPnl)}
-            {formatINR(Math.abs(totalPnl))}
-          </Text>
+          <View style={styles.posHeaderRight}>
+            <Text style={[styles.posTotal, { color: pnlColor(totalPnl) }]}>
+              {pnlSign(totalPnl)}
+              {formatINR(Math.abs(totalPnl))}
+            </Text>
+            <TouchableOpacity
+              style={styles.posMenuBtn}
+              onPress={() => setPosMenuVisible(true)}
+              testID="positions-menu-button"
+            >
+              <Feather name="more-vertical" size={16} color={Colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {loading ? (
@@ -415,7 +434,13 @@ export default function Home() {
             const sym = p.trading_symbol ?? p.symbol ?? "—";
             const side = qty >= 0 ? "BUY" : "SELL";
             return (
-              <View key={`${sym}-${i}`} style={styles.posRow} testID={`position-row-${i}`}>
+              <TouchableOpacity
+                key={`${sym}-${i}`}
+                style={styles.posRow}
+                onPress={() => setSinglePos(p)}
+                testID={`position-row-${i}`}
+                activeOpacity={0.7}
+              >
                 <View style={{ flex: 1 }}>
                   <View style={styles.posRowTop}>
                     <Text style={styles.posSym}>{sym}</Text>
@@ -430,7 +455,7 @@ export default function Home() {
                   {pnlSign(pnl)}
                   {formatINR(Math.abs(pnl))}
                 </Text>
-              </View>
+              </TouchableOpacity>
             );
           })
         )}
@@ -654,6 +679,71 @@ export default function Home() {
         testID="confirm-exit"
       />
 
+      {/* Single-position close sheet */}
+      <BottomSheet
+        visible={!!singlePos}
+        onClose={() => setSinglePos(null)}
+        testID="single-position-sheet"
+      >
+        <Text style={styles.sheetTitle}>{singlePos?.trading_symbol ?? "Position"}</Text>
+        <Text style={styles.sheetSub}>Close this position</Text>
+        <View style={{ gap: 8, marginTop: 8 }}>
+          {[25, 50, 100].map((pct) => (
+            <TouchableOpacity
+              key={pct}
+              style={[styles.closeRow, pct === 100 ? { backgroundColor: Colors.danger } : { backgroundColor: Colors.dangerDark }]}
+              onPress={() => {
+                const sym = singlePos?.trading_symbol;
+                setSinglePos(null);
+                if (sym) doExit(pct as 25 | 50 | 100, { trading_symbol: sym });
+              }}
+              testID={`single-close-${pct}`}
+            >
+              <Text style={styles.closeRowText}>{pct === 100 ? "CLOSE ENTIRE POSITION" : `CLOSE ${pct}%`}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </BottomSheet>
+
+      {/* Positions header kebab menu */}
+      <BottomSheet
+        visible={posMenuVisible}
+        onClose={() => setPosMenuVisible(false)}
+        testID="positions-menu-sheet"
+      >
+        <Text style={styles.sheetTitle}>Positions actions</Text>
+        <View style={{ marginTop: 8 }}>
+          <TouchableOpacity
+            style={styles.menuActionRow}
+            onPress={() => {
+              setPosMenuVisible(false);
+              doExit(100, { pnl_filter: "positive" });
+            }}
+            testID="close-positive-positions"
+          >
+            <Feather name="trending-up" size={16} color={Colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuActionTitle}>Close positive positions</Text>
+              <Text style={styles.menuActionDesc}>Lock in profit on every position currently in the green.</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuActionRow}
+            onPress={() => {
+              setPosMenuVisible(false);
+              doExit(100, { pnl_filter: "negative" });
+            }}
+            testID="close-negative-positions"
+          >
+            <Feather name="trending-down" size={16} color={Colors.danger} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuActionTitle}>Close negative positions</Text>
+              <Text style={styles.menuActionDesc}>Cut every position currently in the red.</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </BottomSheet>
+
       {toast ? (
         <View style={styles.toast} testID="home-toast">
           <Text style={styles.toastText}>{toast}</Text>
@@ -749,9 +839,24 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  posHeader: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8 },
+  posHeader: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, alignItems: "center" },
+  posHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  posMenuBtn: { padding: 4 },
   posTitle: { fontFamily: FONT, fontSize: 13, color: Colors.text, fontWeight: "bold" },
   posTotal: { fontFamily: FONT, fontSize: 13, fontWeight: "bold" },
+
+  closeRow: { paddingVertical: 14, borderRadius: 8, alignItems: "center" },
+  closeRowText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", letterSpacing: 0.6 },
+  menuActionRow: {
+    flexDirection: "row",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  menuActionTitle: { fontFamily: FONT, fontSize: 14, fontWeight: "bold", color: Colors.text },
+  menuActionDesc: { fontFamily: FONT, fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 
   posRow: {
     flexDirection: "row",

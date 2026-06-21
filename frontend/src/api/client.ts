@@ -130,8 +130,8 @@ export const api = {
     req<any>(`/instruments/option-chain?underlying=${encodeURIComponent(underlying)}&expiry=${expiry}&option_type=${option_type}&exchange=${exchange}`),
   placePreset: (payload: { preset_key: string; underlying: string; expiry: string; option_type: "CE" | "PE"; capital: number; exchange?: string; dry_run?: boolean }) =>
     req<any>("/orders/place-preset", { method: "POST", body: JSON.stringify({ exchange: "NSE", ...payload }) }),
-  exit: (percent: 25 | 50 | 100) =>
-    req<any>("/orders/exit", { method: "POST", body: JSON.stringify({ percent }) }),
+  exit: (body: { percent?: 25 | 50 | 100; trading_symbol?: string; pnl_filter?: "positive" | "negative" }) =>
+    req<any>("/orders/exit", { method: "POST", body: JSON.stringify({ percent: 100, ...body }) }),
   presets: () => req<{ items: Preset[] }>("/presets"),
   getPreset: (key: string) => req<Preset>(`/presets/${key}`),
   updatePreset: (key: string, body: Preset) =>

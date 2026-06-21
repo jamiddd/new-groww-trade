@@ -15,6 +15,7 @@ import hashlib
 import logging
 import math
 import os
+import random
 import re
 import time
 import uuid
@@ -150,7 +151,9 @@ class PlacePresetOrderRequest(BaseModel):
 
 
 class ExitRequest(BaseModel):
-    percent: int  # 25 | 50 | 100
+    percent: int = 100  # 25 | 50 | 100
+    trading_symbol: Optional[str] = None  # close just one position
+    pnl_filter: Optional[str] = None  # "positive" | "negative"
 
 
 # ---------------------------------------------------------------------------
@@ -212,62 +215,79 @@ def _demo_margin() -> Dict[str, Any]:
     }
 
 
-def _demo_positions() -> Dict[str, Any]:
-    return {
-        "positions": [
-            {
-                "trading_symbol": "NIFTY24700CE",
-                "exchange": "NSE",
-                "product": "NRML",
-                "net_quantity": 75 * 27,
-                "average_price": 145.80,
-                "last_price": 155.85,
-                "pnl": 20334.6,
-                "transaction_type": "BUY",
-                "created_at": "2026-06-20 11:18:05",
-            },
-            {
-                "trading_symbol": "NIFTY24800CE",
-                "exchange": "NSE",
-                "product": "NRML",
-                "net_quantity": 75 * 27,
-                "average_price": 150.80,
-                "last_price": 158.00,
-                "pnl": 14556.0,
-                "transaction_type": "BUY",
-                "created_at": "2026-06-20 11:24:05",
-            },
-        ]
-    }
+_DEMO_SEED_POSITIONS = [
+    {
+        "trading_symbol": "NIFTY24700CE",
+        "exchange": "NSE",
+        "product": "NRML",
+        "net_quantity": 75 * 27,
+        "average_price": 145.80,
+        "last_price": 155.85,
+        "transaction_type": "BUY",
+        "created_at": "2026-06-20 11:18:05",
+    },
+    {
+        "trading_symbol": "NIFTY24800CE",
+        "exchange": "NSE",
+        "product": "NRML",
+        "net_quantity": 75 * 27,
+        "average_price": 150.80,
+        "last_price": 158.00,
+        "transaction_type": "BUY",
+        "created_at": "2026-06-20 11:24:05",
+    },
+]
 
 
-def _demo_orders() -> Dict[str, Any]:
-    return {
-        "orders": [
-            {
-                "order_id": "demo-001",
-                "trading_symbol": "NIFTY24700CE",
-                "transaction_type": "BUY",
-                "order_status": "EXECUTED",
-                "quantity": 75 * 27,
-                "filled_quantity": 75 * 27,
-                "average_price": 145.80,
-                "order_type": "MARKET",
-                "exchange_time": "2026-06-20 11:18:05",
-            },
-            {
-                "order_id": "demo-002",
-                "trading_symbol": "NIFTY24800CE",
-                "transaction_type": "BUY",
-                "order_status": "EXECUTED",
-                "quantity": 75 * 27,
-                "filled_quantity": 75 * 27,
-                "average_price": 150.80,
-                "order_type": "MARKET",
-                "exchange_time": "2026-06-20 11:24:05",
-            },
-        ]
-    }
+async def _demo_state_for(token: str) -> Dict[str, Any]:
+    """Load (or seed) the per-user demo state from Mongo."""
+    user_key = f"demo:{token}"
+    doc = await db.demo_state.find_one({"_id": user_key})
+    if not doc:
+        doc = {
+            "_id": user_key,
+            "positions": [dict(p) for p in _DEMO_SEED_POSITIONS],
+            "orders": [],
+        }
+        await db.demo_state.insert_one(doc)
+    return doc
+
+
+def _recompute_position_pnl(p: Dict[str, Any]) -> Dict[str, Any]:
+    """Mutate the position dict in place to refresh LTP / PnL with a small
+    random walk so the home screen visibly changes on each refresh."""
+    avg = float(p.get("average_price") or 0)
+    qty = int(p.get("net_quantity") or 0)
+    last = float(p.get("last_price") or avg or 1)
+    # ±1.5% random walk, clamped > 0.1
+    drift = random.uniform(-0.015, 0.015)
+    last = max(0.1, round(last * (1 + drift), 2))
+    p["last_price"] = last
+    p["pnl"] = round((last - avg) * qty, 2)
+    return p
+
+
+async def _save_demo_state(token: str, doc: Dict[str, Any]) -> None:
+    user_key = f"demo:{token}"
+    await db.demo_state.update_one(
+        {"_id": user_key},
+        {"$set": {"positions": doc["positions"], "orders": doc.get("orders", [])}},
+        upsert=True,
+    )
+
+
+async def _demo_positions(token: str) -> Dict[str, Any]:
+    doc = await _demo_state_for(token)
+    for p in doc["positions"]:
+        _recompute_position_pnl(p)
+    await _save_demo_state(token, doc)
+    # Hide closed (qty=0) rows in the API surface
+    return {"positions": [p for p in doc["positions"] if int(p.get("net_quantity") or 0) != 0]}
+
+
+async def _demo_orders(token: str) -> Dict[str, Any]:
+    doc = await _demo_state_for(token)
+    return {"orders": list(reversed(doc.get("orders", [])))[:200]}
 
 
 def _demo_expiries() -> Dict[str, Any]:
@@ -531,7 +551,7 @@ async def margin(token: str = Depends(require_token)):
 @api.get("/account/positions")
 async def positions(token: str = Depends(require_token)):
     if _is_demo(token):
-        return _demo_positions()
+        return await _demo_positions(token)
     api_ = _groww_client(token)
     try:
         data = await _call_blocking(api_.get_positions_for_user, GrowwAPI.SEGMENT_FNO)
@@ -543,7 +563,7 @@ async def positions(token: str = Depends(require_token)):
 @api.get("/account/orders")
 async def orders_history(page: int = 0, page_size: int = 50, token: str = Depends(require_token)):
     if _is_demo(token):
-        return _demo_orders()
+        return await _demo_orders(token)
     api_ = _groww_client(token)
     try:
         data = await _call_blocking(api_.get_order_list, page, page_size, GrowwAPI.SEGMENT_FNO)
@@ -884,16 +904,66 @@ def _pick_strike(rows: List[Dict[str, Any]], spot: float, opt_type: str, strateg
 
 @api.post("/orders/place-preset")
 async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depends(require_token)):
-    # Demo mode: fake an order success and append to demo log
+    # Demo mode: stateful — actually mutate db.demo_state
     if _is_demo(token):
-        fake_symbol = f"{payload.underlying}24800{payload.option_type}"
+        doc = await _demo_state_for(token)
+        # Pick a synthetic strike around 24700 ± 50*offset
+        atm = 24700
+        offsets = {"ATM": 0, "OTM1": 50, "OTM2": 100, "ITM1": -50, "HIGH_GAMMA": 0}
+        # Find preset config for sizing
+        preset_doc = await db.presets.find_one({"key": payload.preset_key}, {"_id": 0})
+        sizing = float(((preset_doc or {}).get("position_sizing_pct") or 25)) / 100.0
+        strike_off = offsets.get((preset_doc or {}).get("strike_selection", "ATM"), 0)
+        strike = atm + strike_off if payload.option_type == "CE" else atm - strike_off
+        fake_symbol = f"NIFTY{strike}{payload.option_type}"
+        ltp = round(random.uniform(80, 200), 2)
+        lot = 75
+        lots = max(1, math.floor((payload.capital * sizing) / (ltp * lot)))
+        qty = lots * lot
+
+        # Merge with existing position if any
+        merged = False
+        for p in doc["positions"]:
+            if p.get("trading_symbol") == fake_symbol:
+                old_qty = int(p.get("net_quantity") or 0)
+                old_avg = float(p.get("average_price") or 0)
+                new_qty = old_qty + qty
+                p["average_price"] = round((old_avg * old_qty + ltp * qty) / max(1, new_qty), 2)
+                p["net_quantity"] = new_qty
+                p["last_price"] = ltp
+                merged = True
+                break
+        if not merged:
+            doc["positions"].append({
+                "trading_symbol": fake_symbol,
+                "exchange": "NSE",
+                "product": "NRML",
+                "net_quantity": qty,
+                "average_price": ltp,
+                "last_price": ltp,
+                "transaction_type": "BUY",
+                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+        order_id = f"demo-{uuid.uuid4().hex[:8]}"
+        doc.setdefault("orders", []).append({
+            "order_id": order_id,
+            "trading_symbol": fake_symbol,
+            "transaction_type": "BUY",
+            "order_status": "EXECUTED",
+            "quantity": qty,
+            "filled_quantity": qty,
+            "average_price": ltp,
+            "order_type": (preset_doc or {}).get("order_type", "MARKET"),
+            "exchange_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        await _save_demo_state(token, doc)
         return {
-            "selected": {"trading_symbol": fake_symbol, "strike": 24800, "ltp": 152.5},
-            "quantity": 75,
-            "lots": 1,
-            "lot_size": 75,
-            "order": {"trading_symbol": fake_symbol, "transaction_type": "BUY", "order_type": "MARKET"},
-            "response": {"order_id": f"demo-{uuid.uuid4().hex[:8]}", "status": "EXECUTED"},
+            "selected": {"trading_symbol": fake_symbol, "strike": strike, "ltp": ltp},
+            "quantity": qty,
+            "lots": lots,
+            "lot_size": lot,
+            "order": {"trading_symbol": fake_symbol, "transaction_type": "BUY", "order_type": (preset_doc or {}).get("order_type", "MARKET")},
+            "response": {"order_id": order_id, "status": "EXECUTED"},
             "demo": True,
         }
 
@@ -999,8 +1069,49 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
 async def exit_positions(payload: ExitRequest, token: str = Depends(require_token)):
     if payload.percent not in (25, 50, 100):
         raise HTTPException(status_code=400, detail="percent must be 25, 50, or 100")
+
     if _is_demo(token):
-        return {"closed": [{"trading_symbol": "DEMO", "quantity": payload.percent, "response": {"status": "DEMO"}}], "count": 1}
+        doc = await _demo_state_for(token)
+        results: List[Dict[str, Any]] = []
+        # Decide which positions are eligible.
+        for p in doc["positions"]:
+            net_qty = int(p.get("net_quantity") or 0)
+            if net_qty == 0:
+                continue
+            if payload.trading_symbol and p.get("trading_symbol") != payload.trading_symbol:
+                continue
+            if payload.pnl_filter:
+                pnl = float(p.get("pnl") or 0)
+                if payload.pnl_filter == "positive" and pnl <= 0:
+                    continue
+                if payload.pnl_filter == "negative" and pnl >= 0:
+                    continue
+            qty_to_close = max(1, math.floor(abs(net_qty) * payload.percent / 100))
+            # Sign matters: if BUY net_qty>0 closing means -qty; SELL net_qty<0 means +qty.
+            sign = -1 if net_qty > 0 else 1
+            p["net_quantity"] = net_qty + sign * qty_to_close
+            results.append({
+                "trading_symbol": p.get("trading_symbol"),
+                "quantity": qty_to_close,
+                "response": {"status": "EXECUTED"},
+            })
+            # Log demo exit order
+            doc.setdefault("orders", []).append({
+                "order_id": f"demo-{uuid.uuid4().hex[:8]}",
+                "trading_symbol": p.get("trading_symbol"),
+                "transaction_type": "SELL" if net_qty > 0 else "BUY",
+                "order_status": "EXECUTED",
+                "quantity": qty_to_close,
+                "filled_quantity": qty_to_close,
+                "average_price": float(p.get("last_price") or 0),
+                "order_type": "MARKET",
+                "exchange_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+        # Drop closed rows
+        doc["positions"] = [p for p in doc["positions"] if int(p.get("net_quantity") or 0) != 0]
+        await _save_demo_state(token, doc)
+        return {"closed": results, "count": len(results)}
+
     api_ = _groww_client(token)
     try:
         pos_resp = await _call_blocking(api_.get_positions_for_user, GrowwAPI.SEGMENT_FNO)
@@ -1013,7 +1124,7 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
     elif isinstance(pos_resp, list):
         positions_list = pos_resp
 
-    results: List[Dict[str, Any]] = []
+    results = []
     for p in positions_list:
         net_qty = int(p.get("net_quantity") or p.get("quantity") or 0)
         if net_qty == 0:
@@ -1021,6 +1132,14 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
         trading_symbol = p.get("trading_symbol") or p.get("symbol")
         if not trading_symbol:
             continue
+        if payload.trading_symbol and trading_symbol != payload.trading_symbol:
+            continue
+        if payload.pnl_filter:
+            pnl = float(p.get("pnl") or p.get("unrealised_pnl") or 0)
+            if payload.pnl_filter == "positive" and pnl <= 0:
+                continue
+            if payload.pnl_filter == "negative" and pnl >= 0:
+                continue
         exchange = p.get("exchange") or "NSE"
         side_qty = abs(net_qty)
         qty_to_close = max(1, math.floor(side_qty * payload.percent / 100))
