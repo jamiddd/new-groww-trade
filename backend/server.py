@@ -269,12 +269,29 @@ def _demo_orders() -> Dict[str, Any]:
 
 
 def _demo_expiries() -> Dict[str, Any]:
-    today = datetime.now(timezone.utc)
+    """Return ~8 weekly + 4 monthly expiries (Thursday rolls)."""
+    today = datetime.now(timezone.utc).date()
+    days_ahead = (3 - today.weekday()) % 7  # next Thursday
     out = []
-    for w in range(6):
-        d = today + timedelta(days=(3 - today.weekday()) % 7 + 7 * w)
-        out.append(d.strftime("%Y-%m-%d"))
-    return {"expiries": out}
+    # 8 weeklies
+    for w in range(8):
+        d = today + timedelta(days=days_ahead + 7 * w)
+        out.append(d.isoformat())
+    # 4 additional monthlies — last Thursday of the next 4 months after weeklies end
+    from calendar import monthrange
+    base = today.replace(day=1)
+    for m in range(2, 6):
+        year = base.year + (base.month - 1 + m) // 12
+        month = (base.month - 1 + m) % 12 + 1
+        last_day = monthrange(year, month)[1]
+        # walk back to last Thursday
+        d = datetime(year, month, last_day).date()
+        while d.weekday() != 3:
+            d -= timedelta(days=1)
+        iso = d.isoformat()
+        if iso not in out:
+            out.append(iso)
+    return {"expiries": sorted(set(out))}
 
 
 # ---------------------------------------------------------------------------
@@ -504,15 +521,53 @@ INDEX_UNDERLYINGS = [
     {"symbol": "BANKEX", "name": "BANKEX", "type": "INDEX"},
 ]
 
+# F&O stock universe (NSE) — used as a fallback when the Groww instrument
+# master CSV is unavailable, and as the canonical demo list. Curated from the
+# NSE F&O-eligible securities list (Jan 2026).
+FNO_STOCKS = [
+    "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT", "ADANIPORTS",
+    "ALKEM", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY", "ASIANPAINT",
+    "ASTRAL", "ATUL", "AUBANK", "AUROPHARMA", "AXISBANK", "BAJAJ-AUTO",
+    "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BANDHANBNK", "BANKBARODA",
+    "BATAINDIA", "BEL", "BERGEPAINT", "BHARATFORG", "BHARTIARTL", "BHEL",
+    "BIOCON", "BOSCHLTD", "BPCL", "BRITANNIA", "BSE", "BSOFT", "CANBK",
+    "CANFINHOME", "CDSL", "CHAMBLFERT", "CHOLAFIN", "CIPLA", "COALINDIA",
+    "COFORGE", "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", "CUB", "CUMMINSIND",
+    "DABUR", "DALBHARAT", "DEEPAKNTR", "DELHIVERY", "DIVISLAB", "DIXON",
+    "DLF", "DRREDDY", "EICHERMOT", "ESCORTS", "EXIDEIND", "FEDERALBNK",
+    "GAIL", "GLENMARK", "GMRINFRA", "GNFC", "GODREJCP", "GODREJPROP",
+    "GRANULES", "GRASIM", "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK",
+    "HDFCLIFE", "HEROMOTOCO", "HFCL", "HINDALCO", "HINDCOPPER", "HINDPETRO",
+    "HINDUNILVR", "ICICIBANK", "ICICIGI", "ICICIPRULI", "IDEA", "IDFCFIRSTB",
+    "IEX", "IGL", "INDHOTEL", "INDIAMART", "INDIGO", "INDUSINDBK", "INDUSTOWER",
+    "INFY", "IOC", "IPCALAB", "IRCTC", "IRFC", "ITC", "JINDALSTEL",
+    "JIOFIN", "JKCEMENT", "JSL", "JSWSTEEL", "JUBLFOOD", "KOTAKBANK",
+    "L&TFH", "LALPATHLAB", "LAURUSLABS", "LICHSGFIN", "LICI", "LT", "LTIM",
+    "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO", "MARUTI",
+    "MAXHEALTH", "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON", "MPHASIS",
+    "MRF", "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR", "NESTLEIND",
+    "NMDC", "NTPC", "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PAYTM",
+    "PEL", "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND",
+    "PNB", "POLICYBZR", "POLYCAB", "POWERGRID", "PVRINOX", "RAMCOCEM",
+    "RBLBANK", "RECLTD", "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN",
+    "SHREECEM", "SHRIRAMFIN", "SIEMENS", "SRF", "SUNPHARMA", "SUNTV",
+    "SYNGENE", "TATACHEM", "TATACOMM", "TATACONSUM", "TATAMOTORS", "TATAPOWER",
+    "TATASTEEL", "TCS", "TECHM", "TIINDIA", "TITAN", "TORNTPHARM", "TORNTPOWER",
+    "TRENT", "TVSMOTOR", "UBL", "ULTRACEMCO", "UNITDSPR", "UPL", "VEDL",
+    "VOLTAS", "WIPRO", "ZEEL", "ZYDUSLIFE",
+]
+FNO_STOCK_ITEMS = [{"symbol": s, "name": s, "type": "STOCK"} for s in FNO_STOCKS]
+
 
 @api.get("/instruments/underlyings")
 async def underlyings(q: str = "", token: str = Depends(require_token)):
     """Searchable list of F&O underlyings (indices + stocks)."""
     if _is_demo(token):
-        return {"items": list(INDEX_UNDERLYINGS) + [
-            {"symbol": s, "name": s, "type": "STOCK"}
-            for s in ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BAJFINANCE", "ADANIENT"]
-        ]}
+        results = list(INDEX_UNDERLYINGS) + list(FNO_STOCK_ITEMS)
+        if q:
+            qu = q.upper()
+            results = [r for r in results if qu in r["symbol"].upper() or qu in r["name"].upper()]
+        return {"items": results[:300]}
     df = _load_instruments(token)
     results: List[Dict[str, Any]] = list(INDEX_UNDERLYINGS)
     if df is not None:
@@ -530,11 +585,17 @@ async def underlyings(q: str = "", token: str = Depends(require_token)):
                     results.append({"symbol": sym, "name": sym, "type": "STOCK"})
         except Exception as exc:  # noqa: BLE001
             logger.warning("Underlying search fallback: %s", exc)
+    # Fallback: if the instrument-master couldn't be loaded, append the curated list.
+    if len(results) <= len(INDEX_UNDERLYINGS):
+        existing = {u["symbol"] for u in results}
+        for item in FNO_STOCK_ITEMS:
+            if item["symbol"] not in existing:
+                results.append(item)
 
     if q:
         qu = q.upper()
         results = [r for r in results if qu in r["symbol"].upper() or qu in r["name"].upper()]
-    return {"items": results[:200]}
+    return {"items": results[:300]}
 
 
 @api.get("/instruments/expiries")

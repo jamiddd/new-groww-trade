@@ -14,10 +14,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
+import { Feather } from "@expo/vector-icons";
 
 import { api, clearToken, AppSettings } from "@/src/api/client";
 import { Colors, FONT } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
+import { formatExpiry } from "@/src/utils/format";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
 import UnderlyingSearchSheet from "@/src/components/UnderlyingSearchSheet";
 import BottomSheet from "@/src/components/BottomSheet";
@@ -79,6 +81,7 @@ export default function Home() {
   const [expiryList, setExpiryList] = useState<string[]>([]);
 
   const [maxLoss, setMaxLoss] = useState<number>(40000);
+  const [actionsCollapsed, setActionsCollapsed] = useState<boolean>(false);
 
   // Modals
   const [searchVisible, setSearchVisible] = useState(false);
@@ -116,6 +119,8 @@ export default function Home() {
             setMaxLoss(stored);
           }
         }
+        const collapsed = await storage.getItem<boolean>("actions_collapsed", false as boolean);
+        if (collapsed) setActionsCollapsed(true);
       } catch (e: any) {
         setError(e?.message ?? "Unable to load settings");
       }
@@ -317,7 +322,7 @@ export default function Home() {
           <Text style={styles.caret}>▾</Text>
           <Text style={styles.headerTitle}>
             {underlying}
-            <Text style={styles.headerExpiry}> · {expiry ?? "pick expiry"}</Text>
+            <Text style={styles.headerExpiry}> · {expiry ? formatExpiry(expiry) : "pick expiry"}</Text>
           </Text>
         </TouchableOpacity>
         <View style={styles.headerRight}>
@@ -423,73 +428,95 @@ export default function Home() {
       {/* Sticky footer with controls */}
       <SafeAreaView edges={["bottom"]} style={styles.footerWrap}>
         <View style={styles.footer}>
-          <View style={styles.footerTop}>
-            <TouchableOpacity
-              style={styles.maxLossPill}
-              onPress={() => {
-                setMaxLossInput(String(maxLoss));
-                setMaxLossVisible(true);
-              }}
-              testID="max-loss-pill"
-            >
-              <Text style={styles.maxLossText}>Set Max Loss: (₹{formatINR(maxLoss)})</Text>
-            </TouchableOpacity>
-            <View style={styles.toggleWrap}>
-              <Text style={[styles.toggleLabel, optionType === "CE" && styles.toggleLabelActive]}>CE</Text>
-              <Switch
-                testID="ce-pe-toggle"
-                value={optionType === "PE"}
-                onValueChange={(v) => setOptionType(v ? "PE" : "CE")}
-                trackColor={{ true: Colors.primary, false: Colors.primary }}
-                thumbColor="#FFFFFF"
-              />
-              <Text style={[styles.toggleLabel, optionType === "PE" && styles.toggleLabelActive]}>PE</Text>
-            </View>
-          </View>
-
-          {/* Buy grid */}
-          <View style={styles.grid}>
-            {PRESET_KEYS.map((p) => {
-              const isLmt = p.order_type === "LMT";
-              const dynamicLabel = p.label.replace("CALL", optionType === "CE" ? "CALL" : "PUT");
-              return (
-                <TouchableOpacity
-                  key={p.key}
-                  style={[styles.buyBtn, { backgroundColor: isLmt ? Colors.primaryDark : Colors.primary }]}
-                  onPress={() => onPresetPress(p)}
-                  onLongPress={() => router.push(`/preset?key=${p.key}`)}
-                  delayLongPress={400}
-                  testID={`buy-button-${p.key}`}
-                >
-                  <Text style={styles.buyText}>{dynamicLabel}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <View style={styles.exitRow}>
-            <TouchableOpacity
-              style={[styles.exitBtn, styles.exitPartial]}
-              onPress={() => onExitPress(25)}
-              testID="exit-25-button"
-            >
-              <Text style={styles.exitText}>EXIT 25% POSITIONS</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.exitBtn, styles.exitPartial]}
-              onPress={() => onExitPress(50)}
-              testID="exit-50-button"
-            >
-              <Text style={styles.exitText}>EXIT 50% POSITIONS</Text>
-            </TouchableOpacity>
-          </View>
           <TouchableOpacity
-            style={[styles.exitBtn, styles.exitAll]}
-            onPress={() => onExitPress(100)}
-            testID="exit-all-button"
+            style={styles.actionsHeader}
+            onPress={() => {
+              const next = !actionsCollapsed;
+              setActionsCollapsed(next);
+              storage.setItem("actions_collapsed", next);
+            }}
+            testID="actions-toggle"
+            activeOpacity={0.7}
           >
-            <Text style={styles.exitText}>EXIT ALL POSITIONS</Text>
+            <Text style={styles.actionsHeaderLabel}>ACTIONS</Text>
+            <Feather
+              name={actionsCollapsed ? "chevron-up" : "chevron-down"}
+              size={18}
+              color={Colors.textSecondary}
+            />
           </TouchableOpacity>
+
+          {!actionsCollapsed ? (
+            <View testID="actions-body">
+              <View style={styles.footerTop}>
+                <TouchableOpacity
+                  style={styles.maxLossPill}
+                  onPress={() => {
+                    setMaxLossInput(String(maxLoss));
+                    setMaxLossVisible(true);
+                  }}
+                  testID="max-loss-pill"
+                >
+                  <Text style={styles.maxLossText}>Set Max Loss: (₹{formatINR(maxLoss)})</Text>
+                </TouchableOpacity>
+                <View style={styles.toggleWrap}>
+                  <Text style={[styles.toggleLabel, optionType === "CE" && styles.toggleLabelActive]}>CE</Text>
+                  <Switch
+                    testID="ce-pe-toggle"
+                    value={optionType === "PE"}
+                    onValueChange={(v) => setOptionType(v ? "PE" : "CE")}
+                    trackColor={{ true: Colors.primary, false: Colors.primary }}
+                    thumbColor="#FFFFFF"
+                  />
+                  <Text style={[styles.toggleLabel, optionType === "PE" && styles.toggleLabelActive]}>PE</Text>
+                </View>
+              </View>
+
+              {/* Buy grid */}
+              <View style={styles.grid}>
+                {PRESET_KEYS.map((p) => {
+                  const isLmt = p.order_type === "LMT";
+                  const dynamicLabel = p.label.replace("CALL", optionType === "CE" ? "CALL" : "PUT");
+                  return (
+                    <TouchableOpacity
+                      key={p.key}
+                      style={[styles.buyBtn, { backgroundColor: isLmt ? Colors.primaryDark : Colors.primary }]}
+                      onPress={() => onPresetPress(p)}
+                      onLongPress={() => router.push(`/preset?key=${p.key}`)}
+                      delayLongPress={400}
+                      testID={`buy-button-${p.key}`}
+                    >
+                      <Text style={styles.buyText}>{dynamicLabel}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.exitRow}>
+                <TouchableOpacity
+                  style={[styles.exitBtn, styles.exitPartial]}
+                  onPress={() => onExitPress(25)}
+                  testID="exit-25-button"
+                >
+                  <Text style={styles.exitText}>EXIT 25% POSITIONS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.exitBtn, styles.exitPartial]}
+                  onPress={() => onExitPress(50)}
+                  testID="exit-50-button"
+                >
+                  <Text style={styles.exitText}>EXIT 50% POSITIONS</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={[styles.exitBtn, styles.exitAll]}
+                onPress={() => onExitPress(100)}
+                testID="exit-all-button"
+              >
+                <Text style={styles.exitText}>EXIT ALL POSITIONS</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
       </SafeAreaView>
 
@@ -569,7 +596,7 @@ export default function Home() {
                 onPress={() => onPickExpiry(e)}
                 testID={`expiry-row-${e}`}
               >
-                <Text style={styles.expiryText}>{e}</Text>
+                <Text style={styles.expiryText}>{formatExpiry(e)}</Text>
                 {expiry === e ? <Text style={styles.expiryCheck}>✓</Text> : null}
               </TouchableOpacity>
             ))}
@@ -604,7 +631,7 @@ export default function Home() {
       <ConfirmSheet
         visible={!!confirmPreset}
         title={confirmPreset?.label ?? ""}
-        message={`Underlying: ${underlying} · Expiry: ${expiry ?? "?"} · Side: ${optionType}`}
+        message={`Underlying: ${underlying} · Expiry: ${expiry ? formatExpiry(expiry) : "?"} · Side: ${optionType}`}
         confirmLabel={placing ? "PLACING…" : "PLACE ORDER"}
         cancelLabel="CANCEL"
         onConfirm={() => confirmPreset && placePreset(confirmPreset)}
@@ -728,8 +755,21 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
     backgroundColor: "#FFF",
     paddingHorizontal: 12,
-    paddingTop: 10,
     paddingBottom: 6,
+  },
+  actionsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  actionsHeaderLabel: {
+    fontFamily: FONT,
+    fontSize: 11,
+    fontWeight: "bold",
+    color: Colors.textSecondary,
+    letterSpacing: 1.4,
   },
   footerTop: {
     flexDirection: "row",
