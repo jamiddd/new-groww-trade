@@ -82,6 +82,25 @@ export const api = {
       auth: false,
     }),
   verify: () => req("/auth/verify"),
+  serverIp: () => req<{ ip: string }>("/auth/server-ip", { auth: false }),
+  listProfiles: () =>
+    req<{ items: { id: string; name: string; key_preview: string; mode: "passphrase" | "device"; created_at: string }[] }>(
+      "/auth/profiles",
+      { auth: false },
+    ),
+  saveProfile: (body: { name: string; api_key: string; api_secret: string; passphrase?: string; device_token?: string }) =>
+    req<{ id: string; name: string; key_preview: string; mode: string; created_at: string }>("/auth/profiles", {
+      method: "POST",
+      body: JSON.stringify(body),
+      auth: false,
+    }),
+  deleteProfile: (id: string) => req(`/auth/profiles/${id}`, { method: "DELETE", auth: false }),
+  unlockProfile: (id: string, body: { passphrase?: string; device_token?: string }) =>
+    req<{ access_token: string }>(`/auth/profiles/${id}/unlock`, {
+      method: "POST",
+      body: JSON.stringify(body),
+      auth: false,
+    }),
   margin: () => req<any>("/account/margin"),
   positions: () => req<any>("/account/positions"),
   orders: () => req<any>("/account/orders"),

@@ -16,12 +16,17 @@ import math
 import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
 import pyotp
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+import base64
+import secrets
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from growwapi import GrowwAPI
@@ -147,6 +152,132 @@ class ExitRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Encryption helpers for saved profiles
+# ---------------------------------------------------------------------------
+SERVER_PEPPER = os.environ.get("SCALPX_PEPPER")
+if not SERVER_PEPPER:
+    # Generate once and persist to a file so restarts don't invalidate stored
+    # ciphertexts. This file is the equivalent of an HSM key for this demo.
+    PEPPER_PATH = ROOT_DIR / ".pepper"
+    if PEPPER_PATH.exists():
+        SERVER_PEPPER = PEPPER_PATH.read_text().strip()
+    else:
+        SERVER_PEPPER = secrets.token_urlsafe(32)
+        PEPPER_PATH.write_text(SERVER_PEPPER)
+
+
+def _derive_key(secret: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt + SERVER_PEPPER.encode(), iterations=200_000)
+    return kdf.derive(secret.encode())
+
+
+def _encrypt(plaintext: str, secret: str) -> Dict[str, str]:
+    salt = secrets.token_bytes(16)
+    nonce = secrets.token_bytes(12)
+    key = _derive_key(secret, salt)
+    ct = AESGCM(key).encrypt(nonce, plaintext.encode(), None)
+    return {
+        "salt": base64.b64encode(salt).decode(),
+        "nonce": base64.b64encode(nonce).decode(),
+        "ciphertext": base64.b64encode(ct).decode(),
+    }
+
+
+def _decrypt(blob: Dict[str, str], secret: str) -> str:
+    salt = base64.b64decode(blob["salt"])
+    nonce = base64.b64decode(blob["nonce"])
+    ct = base64.b64decode(blob["ciphertext"])
+    key = _derive_key(secret, salt)
+    return AESGCM(key).decrypt(nonce, ct, None).decode()
+
+
+# ---------------------------------------------------------------------------
+# Demo mode constants
+# ---------------------------------------------------------------------------
+DEMO_TOKEN = "DEMO__SCALPX__TOKEN"
+
+
+def _is_demo(token: str) -> bool:
+    return token == DEMO_TOKEN
+
+
+def _demo_margin() -> Dict[str, Any]:
+    return {
+        "equity": {"available_cash": 134890.60, "net_margin_available": 134890.60},
+        "used_margin": 0.0,
+        "available_margin": 134890.60,
+        "net_margin_available": 134890.60,
+    }
+
+
+def _demo_positions() -> Dict[str, Any]:
+    return {
+        "positions": [
+            {
+                "trading_symbol": "NIFTY24700CE",
+                "exchange": "NSE",
+                "product": "NRML",
+                "net_quantity": 75 * 27,
+                "average_price": 145.80,
+                "last_price": 155.85,
+                "pnl": 20334.6,
+                "transaction_type": "BUY",
+                "created_at": "2026-06-20 11:18:05",
+            },
+            {
+                "trading_symbol": "NIFTY24800CE",
+                "exchange": "NSE",
+                "product": "NRML",
+                "net_quantity": 75 * 27,
+                "average_price": 150.80,
+                "last_price": 158.00,
+                "pnl": 14556.0,
+                "transaction_type": "BUY",
+                "created_at": "2026-06-20 11:24:05",
+            },
+        ]
+    }
+
+
+def _demo_orders() -> Dict[str, Any]:
+    return {
+        "orders": [
+            {
+                "order_id": "demo-001",
+                "trading_symbol": "NIFTY24700CE",
+                "transaction_type": "BUY",
+                "order_status": "EXECUTED",
+                "quantity": 75 * 27,
+                "filled_quantity": 75 * 27,
+                "average_price": 145.80,
+                "order_type": "MARKET",
+                "exchange_time": "2026-06-20 11:18:05",
+            },
+            {
+                "order_id": "demo-002",
+                "trading_symbol": "NIFTY24800CE",
+                "transaction_type": "BUY",
+                "order_status": "EXECUTED",
+                "quantity": 75 * 27,
+                "filled_quantity": 75 * 27,
+                "average_price": 150.80,
+                "order_type": "MARKET",
+                "exchange_time": "2026-06-20 11:24:05",
+            },
+        ]
+    }
+
+
+def _demo_expiries() -> Dict[str, Any]:
+    today = datetime.now(timezone.utc)
+    out = []
+    for w in range(6):
+        d = today + timedelta(days=(3 - today.weekday()) % 7 + 7 * w)
+        out.append(d.strftime("%Y-%m-%d"))
+    return {"expiries": out}
+
+
+# ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 app = FastAPI(title="ScalpX")
@@ -163,6 +294,10 @@ async def health() -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 @api.post("/auth/login", response_model=LoginResponse)
 async def login(payload: LoginRequest):
+    # Demo shortcut — exposes a fully-functional UI without any Groww account.
+    if payload.api_key.strip().lower() == "demo" and payload.api_secret.strip().lower() == "demo":
+        return LoginResponse(access_token=DEMO_TOKEN)
+
     try:
         result = await _call_blocking(
             GrowwAPI.get_access_token,
@@ -186,6 +321,8 @@ async def login(payload: LoginRequest):
 
 @api.get("/auth/verify")
 async def verify(token: str = Depends(require_token)):
+    if _is_demo(token):
+        return {"ok": True, "profile": {"user_id": "demo", "name": "Demo User"}}
     api_ = _groww_client(token)
     try:
         profile = await _call_blocking(api_.get_user_profile)
@@ -195,10 +332,134 @@ async def verify(token: str = Depends(require_token)):
 
 
 # ---------------------------------------------------------------------------
+# Saved profiles (encrypted credentials)
+# ---------------------------------------------------------------------------
+class SaveProfileRequest(BaseModel):
+    name: str
+    api_key: str
+    api_secret: str
+    passphrase: Optional[str] = None  # required when save_mode == "passphrase"
+    device_token: Optional[str] = None  # required when save_mode == "device"
+
+
+class UnlockProfileRequest(BaseModel):
+    passphrase: Optional[str] = None
+    device_token: Optional[str] = None
+
+
+def _key_preview(k: str) -> str:
+    if len(k) <= 8:
+        return k
+    return f"{k[:4]}…{k[-4:]}"
+
+
+@api.get("/auth/profiles")
+async def list_profiles():
+    cursor = db.profiles.find({}, {"_id": 0, "encrypted": 0})
+    items: List[Dict[str, Any]] = []
+    async for doc in cursor:
+        items.append(doc)
+    return {"items": items}
+
+
+@api.post("/auth/profiles")
+async def save_profile(payload: SaveProfileRequest):
+    if not payload.passphrase and not payload.device_token:
+        raise HTTPException(status_code=400, detail="passphrase or device_token required")
+    secret = payload.passphrase or payload.device_token  # type: ignore[assignment]
+    blob = _encrypt(f"{payload.api_key}\n{payload.api_secret}", secret)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": payload.name,
+        "key_preview": _key_preview(payload.api_key),
+        "mode": "passphrase" if payload.passphrase else "device",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "encrypted": blob,
+    }
+    await db.profiles.insert_one(doc)
+    return {
+        "id": doc["id"],
+        "name": doc["name"],
+        "key_preview": doc["key_preview"],
+        "mode": doc["mode"],
+        "created_at": doc["created_at"],
+    }
+
+
+@api.delete("/auth/profiles/{profile_id}")
+async def delete_profile(profile_id: str):
+    res = await db.profiles.delete_one({"id": profile_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"ok": True}
+
+
+@api.post("/auth/profiles/{profile_id}/unlock", response_model=LoginResponse)
+async def unlock_profile(profile_id: str, payload: UnlockProfileRequest):
+    doc = await db.profiles.find_one({"id": profile_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    secret = payload.passphrase or payload.device_token
+    if not secret:
+        raise HTTPException(status_code=400, detail="passphrase or device_token required")
+    try:
+        plaintext = _decrypt(doc["encrypted"], secret)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=403, detail="Wrong passphrase or device token")
+    parts = plaintext.split("\n", 1)
+    if len(parts) != 2:
+        raise HTTPException(status_code=500, detail="Corrupt profile payload")
+    api_key, api_secret = parts
+    # Demo profile shortcut
+    if api_key.strip().lower() == "demo" and api_secret.strip().lower() == "demo":
+        return LoginResponse(access_token=DEMO_TOKEN)
+    try:
+        result = await _call_blocking(GrowwAPI.get_access_token, api_key, None, api_secret)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=401, detail=f"Groww login failed: {exc}") from exc
+    token = None
+    if isinstance(result, dict):
+        token = result.get("access_token") or result.get("token") or result.get("accessToken")
+    if not token and isinstance(result, str):
+        token = result
+    if not token:
+        raise HTTPException(status_code=502, detail=f"Unexpected Groww response: {result}")
+    return LoginResponse(access_token=token)
+
+
+# ---------------------------------------------------------------------------
+# Server outbound IP (for Groww IP-whitelist UI)
+# ---------------------------------------------------------------------------
+_IP_CACHE: Dict[str, Any] = {"ts": 0.0, "ip": None}
+
+
+@api.get("/auth/server-ip")
+async def server_ip():
+    now = time.time()
+    if _IP_CACHE["ip"] and (now - _IP_CACHE["ts"]) < 3600:
+        return {"ip": _IP_CACHE["ip"], "cached": True}
+    for url in ("https://api.ipify.org?format=json", "https://ifconfig.me/ip"):
+        try:
+            async with httpx.AsyncClient(timeout=5) as cli:
+                resp = await cli.get(url)
+                if resp.status_code == 200:
+                    ip = resp.json().get("ip") if "ipify" in url else resp.text.strip()
+                    if ip:
+                        _IP_CACHE["ip"] = ip
+                        _IP_CACHE["ts"] = now
+                        return {"ip": ip, "cached": False}
+        except Exception:  # noqa: BLE001
+            continue
+    return {"ip": "unknown", "cached": False}
+
+
+# ---------------------------------------------------------------------------
 # Account
 # ---------------------------------------------------------------------------
 @api.get("/account/margin")
 async def margin(token: str = Depends(require_token)):
+    if _is_demo(token):
+        return _demo_margin()
     api_ = _groww_client(token)
     try:
         data = await _call_blocking(api_.get_available_margin_details)
@@ -209,6 +470,8 @@ async def margin(token: str = Depends(require_token)):
 
 @api.get("/account/positions")
 async def positions(token: str = Depends(require_token)):
+    if _is_demo(token):
+        return _demo_positions()
     api_ = _groww_client(token)
     try:
         data = await _call_blocking(api_.get_positions_for_user, GrowwAPI.SEGMENT_FNO)
@@ -219,6 +482,8 @@ async def positions(token: str = Depends(require_token)):
 
 @api.get("/account/orders")
 async def orders_history(page: int = 0, page_size: int = 50, token: str = Depends(require_token)):
+    if _is_demo(token):
+        return _demo_orders()
     api_ = _groww_client(token)
     try:
         data = await _call_blocking(api_.get_order_list, page, page_size, GrowwAPI.SEGMENT_FNO)
@@ -243,6 +508,11 @@ INDEX_UNDERLYINGS = [
 @api.get("/instruments/underlyings")
 async def underlyings(q: str = "", token: str = Depends(require_token)):
     """Searchable list of F&O underlyings (indices + stocks)."""
+    if _is_demo(token):
+        return {"items": list(INDEX_UNDERLYINGS) + [
+            {"symbol": s, "name": s, "type": "STOCK"}
+            for s in ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BAJFINANCE", "ADANIENT"]
+        ]}
     df = _load_instruments(token)
     results: List[Dict[str, Any]] = list(INDEX_UNDERLYINGS)
     if df is not None:
@@ -269,6 +539,8 @@ async def underlyings(q: str = "", token: str = Depends(require_token)):
 
 @api.get("/instruments/expiries")
 async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(require_token)):
+    if _is_demo(token):
+        return _demo_expiries()
     api_ = _groww_client(token)
     try:
         data = await _call_blocking(api_.get_expiries, exchange, underlying)
@@ -370,6 +642,19 @@ def _pick_strike(rows: List[Dict[str, Any]], spot: float, opt_type: str, strateg
 
 @api.post("/orders/place-preset")
 async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depends(require_token)):
+    # Demo mode: fake an order success and append to demo log
+    if _is_demo(token):
+        fake_symbol = f"{payload.underlying}24800{payload.option_type}"
+        return {
+            "selected": {"trading_symbol": fake_symbol, "strike": 24800, "ltp": 152.5},
+            "quantity": 75,
+            "lots": 1,
+            "lot_size": 75,
+            "order": {"trading_symbol": fake_symbol, "transaction_type": "BUY", "order_type": "MARKET"},
+            "response": {"order_id": f"demo-{uuid.uuid4().hex[:8]}", "status": "EXECUTED"},
+            "demo": True,
+        }
+
     # 1. Fetch the preset config
     preset_doc = await db.presets.find_one({"key": payload.preset_key}, {"_id": 0})
     if not preset_doc:
@@ -472,6 +757,8 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
 async def exit_positions(payload: ExitRequest, token: str = Depends(require_token)):
     if payload.percent not in (25, 50, 100):
         raise HTTPException(status_code=400, detail="percent must be 25, 50, or 100")
+    if _is_demo(token):
+        return {"closed": [{"trading_symbol": "DEMO", "quantity": payload.percent, "response": {"status": "DEMO"}}], "count": 1}
     api_ = _groww_client(token)
     try:
         pos_resp = await _call_blocking(api_.get_positions_for_user, GrowwAPI.SEGMENT_FNO)
