@@ -11,8 +11,6 @@ import {
   Pressable,
   Switch,
   TextInput,
-  KeyboardAvoidingView,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -22,6 +20,7 @@ import { Colors, FONT } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
 import UnderlyingSearchSheet from "@/src/components/UnderlyingSearchSheet";
+import BottomSheet from "@/src/components/BottomSheet";
 
 type Position = {
   trading_symbol?: string;
@@ -553,58 +552,53 @@ export default function Home() {
       </Modal>
 
       {/* Expiry sheet */}
-      <Modal visible={expirySheetVisible} transparent animationType="slide" onRequestClose={() => setExpirySheetVisible(false)}>
-        <Pressable style={styles.menuBackdrop} onPress={() => setExpirySheetVisible(false)}>
-          <View />
-        </Pressable>
-        <SafeAreaView edges={["bottom"]} style={styles.bottomSheetWrap}>
-          <View style={styles.bottomSheet} testID="expiry-sheet">
-            <View style={styles.grabber} />
-            <Text style={styles.sheetTitle}>Select Expiry · {underlying}</Text>
-            {expiryList.length === 0 ? (
-              <Text style={styles.empty}>No expiries available.</Text>
-            ) : (
-              expiryList.map((e) => (
-                <TouchableOpacity
-                  key={e}
-                  style={styles.expiryRow}
-                  onPress={() => onPickExpiry(e)}
-                  testID={`expiry-row-${e}`}
-                >
-                  <Text style={styles.expiryText}>{e}</Text>
-                  {expiry === e ? <Text style={styles.expiryCheck}>✓</Text> : null}
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
-        </SafeAreaView>
-      </Modal>
+      <BottomSheet
+        visible={expirySheetVisible}
+        onClose={() => setExpirySheetVisible(false)}
+        testID="expiry-sheet"
+      >
+        <Text style={styles.sheetTitle}>Select Expiry · {underlying}</Text>
+        {expiryList.length === 0 ? (
+          <Text style={styles.empty}>No expiries available.</Text>
+        ) : (
+          <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }}>
+            {expiryList.map((e) => (
+              <TouchableOpacity
+                key={e}
+                style={styles.expiryRow}
+                onPress={() => onPickExpiry(e)}
+                testID={`expiry-row-${e}`}
+              >
+                <Text style={styles.expiryText}>{e}</Text>
+                {expiry === e ? <Text style={styles.expiryCheck}>✓</Text> : null}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </BottomSheet>
 
       {/* Max Loss prompt */}
-      <Modal visible={maxLossVisible} transparent animationType="slide" onRequestClose={() => setMaxLossVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-          <Pressable style={styles.menuBackdrop} onPress={() => setMaxLossVisible(false)} />
-          <SafeAreaView edges={["bottom"]} style={styles.bottomSheetWrap}>
-            <View style={styles.bottomSheet} testID="max-loss-sheet">
-              <View style={styles.grabber} />
-              <Text style={styles.sheetTitle}>Daily Max Loss</Text>
-              <Text style={styles.sheetSub}>Set the maximum loss for today (₹)</Text>
-              <TextInput
-                style={styles.sheetInput}
-                value={maxLossInput}
-                onChangeText={setMaxLossInput}
-                keyboardType="number-pad"
-                placeholder="40000"
-                placeholderTextColor={Colors.textMuted}
-                testID="max-loss-input"
-              />
-              <TouchableOpacity style={styles.sheetCta} onPress={saveMaxLoss} testID="max-loss-save">
-                <Text style={styles.sheetCtaText}>SAVE</Text>
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
-      </Modal>
+      <BottomSheet
+        visible={maxLossVisible}
+        onClose={() => setMaxLossVisible(false)}
+        avoidKeyboard
+        testID="max-loss-sheet"
+      >
+        <Text style={styles.sheetTitle}>Daily Max Loss</Text>
+        <Text style={styles.sheetSub}>Set the maximum loss for today (₹)</Text>
+        <TextInput
+          style={styles.sheetInput}
+          value={maxLossInput}
+          onChangeText={setMaxLossInput}
+          keyboardType="number-pad"
+          placeholder="40000"
+          placeholderTextColor={Colors.textMuted}
+          testID="max-loss-input"
+        />
+        <TouchableOpacity style={styles.sheetCta} onPress={saveMaxLoss} testID="max-loss-save">
+          <Text style={styles.sheetCtaText}>SAVE</Text>
+        </TouchableOpacity>
+      </BottomSheet>
 
       {/* Order confirm */}
       <ConfirmSheet

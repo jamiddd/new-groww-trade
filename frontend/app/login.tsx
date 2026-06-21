@@ -10,8 +10,6 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
-  Modal,
-  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -21,6 +19,7 @@ import * as Clipboard from "expo-clipboard";
 import { api, setToken } from "@/src/api/client";
 import { storage } from "@/src/utils/storage";
 import { Colors, FONT } from "@/src/theme";
+import BottomSheet from "@/src/components/BottomSheet";
 
 type SavedProfile = {
   id: string;
@@ -400,82 +399,76 @@ export default function Login() {
       </KeyboardAvoidingView>
 
       {/* Passphrase unlock modal */}
-      <Modal visible={!!unlockProfile} transparent animationType="slide" onRequestClose={() => setUnlockProfile(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-          <Pressable style={styles.backdrop} onPress={() => setUnlockProfile(null)} />
-          <SafeAreaView edges={["bottom"]} style={styles.sheetWrap}>
-            <View style={styles.sheet} testID="passphrase-sheet">
-              <View style={styles.grabber} />
-              <Text style={styles.sheetTitle}>Unlock {unlockProfile?.name}</Text>
-              <Text style={styles.sheetSub}>Enter the passphrase you set when saving this profile.</Text>
-              <TextInput
-                style={styles.input}
-                value={passphraseInput}
-                onChangeText={setPassphraseInput}
-                secureTextEntry
-                autoFocus
-                placeholder="Passphrase"
-                placeholderTextColor={Colors.textMuted}
-                testID="passphrase-input"
-              />
-              <TouchableOpacity style={styles.sheetCta} onPress={doUnlock} testID="passphrase-submit">
-                <Text style={styles.sheetCtaText}>{loading ? "Unlocking…" : "UNLOCK & CONNECT"}</Text>
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
-      </Modal>
+      <BottomSheet
+        visible={!!unlockProfile}
+        onClose={() => setUnlockProfile(null)}
+        avoidKeyboard
+        testID="passphrase-sheet"
+      >
+        <Text style={styles.sheetTitle}>Unlock {unlockProfile?.name}</Text>
+        <Text style={styles.sheetSub}>Enter the passphrase you set when saving this profile.</Text>
+        <TextInput
+          style={styles.input}
+          value={passphraseInput}
+          onChangeText={setPassphraseInput}
+          secureTextEntry
+          autoFocus
+          placeholder="Passphrase"
+          placeholderTextColor={Colors.textMuted}
+          testID="passphrase-input"
+        />
+        <TouchableOpacity style={styles.sheetCta} onPress={doUnlock} testID="passphrase-submit">
+          <Text style={styles.sheetCtaText}>{loading ? "Unlocking…" : "UNLOCK & CONNECT"}</Text>
+        </TouchableOpacity>
+      </BottomSheet>
 
       {/* Save profile modal */}
-      <Modal visible={saveProfileVisible} transparent animationType="slide" onRequestClose={() => setSaveProfileVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-          <Pressable style={styles.backdrop} onPress={() => setSaveProfileVisible(false)} />
-          <SafeAreaView edges={["bottom"]} style={styles.sheetWrap}>
-            <View style={styles.sheet} testID="save-profile-sheet">
-              <View style={styles.grabber} />
-              <Text style={styles.sheetTitle}>Save this profile</Text>
-              <Text style={styles.sheetSub}>Give it a name and (if needed) a passphrase.</Text>
-              <TextInput
-                style={styles.input}
-                value={profileName}
-                onChangeText={setProfileName}
-                placeholder="Profile name (e.g., Pixel)"
-                placeholderTextColor={Colors.textMuted}
-                testID="profile-name-input"
-              />
-              {saveWithPassphrase ? (
-                <View style={[styles.inputWithIcon, { marginTop: 12 }]}>
-                  <TextInput
-                    style={[styles.input, { flex: 1, borderWidth: 0, paddingRight: 36 }]}
-                    value={savePassphrase}
-                    onChangeText={setSavePassphrase}
-                    secureTextEntry={!showSavePassphrase}
-                    placeholder="Passphrase (min 4 chars)"
-                    placeholderTextColor={Colors.textMuted}
-                    testID="profile-passphrase-input"
-                  />
-                  <TouchableOpacity onPress={() => setShowSavePassphrase((v) => !v)} style={styles.eyeIconBtn}>
-                    <Feather name={showSavePassphrase ? "eye-off" : "eye"} size={16} color={Colors.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-              <TouchableOpacity style={styles.sheetCta} onPress={finalizeSaveAndContinue} testID="save-profile-submit">
-                <Text style={styles.sheetCtaText}>SAVE & CONTINUE</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.skipBtn}
-                onPress={() => {
-                  setSaveProfileVisible(false);
-                  router.replace("/home");
-                }}
-                testID="save-profile-skip"
-              >
-                <Text style={styles.skipText}>Skip saving</Text>
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
-      </Modal>
+      <BottomSheet
+        visible={saveProfileVisible}
+        onClose={() => setSaveProfileVisible(false)}
+        avoidKeyboard
+        testID="save-profile-sheet"
+      >
+        <Text style={styles.sheetTitle}>Save this profile</Text>
+        <Text style={styles.sheetSub}>Give it a name and (if needed) a passphrase.</Text>
+        <TextInput
+          style={styles.input}
+          value={profileName}
+          onChangeText={setProfileName}
+          placeholder="Profile name (e.g., Pixel)"
+          placeholderTextColor={Colors.textMuted}
+          testID="profile-name-input"
+        />
+        {saveWithPassphrase ? (
+          <View style={[styles.inputWithIcon, { marginTop: 12 }]}>
+            <TextInput
+              style={[styles.input, { flex: 1, borderWidth: 0, paddingRight: 36 }]}
+              value={savePassphrase}
+              onChangeText={setSavePassphrase}
+              secureTextEntry={!showSavePassphrase}
+              placeholder="Passphrase (min 4 chars)"
+              placeholderTextColor={Colors.textMuted}
+              testID="profile-passphrase-input"
+            />
+            <TouchableOpacity onPress={() => setShowSavePassphrase((v) => !v)} style={styles.eyeIconBtn}>
+              <Feather name={showSavePassphrase ? "eye-off" : "eye"} size={16} color={Colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+        <TouchableOpacity style={styles.sheetCta} onPress={finalizeSaveAndContinue} testID="save-profile-submit">
+          <Text style={styles.sheetCtaText}>SAVE & CONTINUE</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.skipBtn}
+          onPress={() => {
+            setSaveProfileVisible(false);
+            router.replace("/home");
+          }}
+          testID="save-profile-skip"
+        >
+          <Text style={styles.skipText}>Skip saving</Text>
+        </TouchableOpacity>
+      </BottomSheet>
     </SafeAreaView>
   );
 }

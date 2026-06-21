@@ -6,17 +6,14 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Modal,
-  Pressable,
   TextInput,
-  KeyboardAvoidingView,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api, Preset } from "@/src/api/client";
 import { Colors, FONT } from "@/src/theme";
+import BottomSheet from "@/src/components/BottomSheet";
 
 const STRIKE_OPTIONS = ["HIGH_GAMMA", "ATM", "OTM1", "OTM2", "ITM1"];
 const IV_OPTIONS = ["LOW_IV", "HIGH_IV", "ANY"];
@@ -300,26 +297,22 @@ function ListPicker({
   onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <SafeAreaView edges={["bottom"]} style={styles.sheetWrap}>
-        <View style={styles.sheet} testID={`picker-${title}`}>
-          <View style={styles.grabber} />
-          <Text style={styles.sheetTitle}>{title}</Text>
-          {options.map((opt) => (
-            <TouchableOpacity
-              key={opt}
-              style={styles.optRow}
-              onPress={() => onPick(opt)}
-              testID={`picker-option-${opt}`}
-            >
-              <Text style={styles.optText}>{labels[opt] ?? opt}</Text>
-              {value === opt ? <Text style={styles.optCheck}>✓</Text> : null}
-            </TouchableOpacity>
-          ))}
-        </View>
-      </SafeAreaView>
-    </Modal>
+    <BottomSheet visible={visible} onClose={onClose} testID={`picker-${title}`}>
+      <Text style={styles.sheetTitle}>{title}</Text>
+      <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }}>
+        {options.map((opt) => (
+          <TouchableOpacity
+            key={opt}
+            style={styles.optRow}
+            onPress={() => onPick(opt)}
+            testID={`picker-option-${opt}`}
+          >
+            <Text style={styles.optText}>{labels[opt] ?? opt}</Text>
+            {value === opt ? <Text style={styles.optCheck}>✓</Text> : null}
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </BottomSheet>
   );
 }
 
@@ -339,32 +332,24 @@ function NumberPicker({
   onSave: (v: number) => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
-        <SafeAreaView edges={["bottom"]} style={styles.sheetWrap}>
-          <View style={styles.sheet}>
-            <View style={styles.grabber} />
-            <Text style={styles.sheetTitle}>{title}</Text>
-            <TextInput
-              style={styles.input}
-              value={value}
-              onChangeText={onChange}
-              keyboardType="decimal-pad"
-              autoFocus
-              testID="number-picker-input"
-            />
-            <TouchableOpacity
-              style={styles.saveBtn}
-              onPress={() => onSave(Number(value) || 0)}
-              testID="number-picker-save"
-            >
-              <Text style={styles.saveText}>SAVE</Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </KeyboardAvoidingView>
-    </Modal>
+    <BottomSheet visible={visible} onClose={onClose} avoidKeyboard testID={`number-picker-${title}`}>
+      <Text style={styles.sheetTitle}>{title}</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChange}
+        keyboardType="decimal-pad"
+        autoFocus
+        testID="number-picker-input"
+      />
+      <TouchableOpacity
+        style={styles.saveBtn}
+        onPress={() => onSave(Number(value) || 0)}
+        testID="number-picker-save"
+      >
+        <Text style={styles.saveText}>SAVE</Text>
+      </TouchableOpacity>
+    </BottomSheet>
   );
 }
 
