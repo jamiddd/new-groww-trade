@@ -630,42 +630,98 @@ def _live_expiries_from_master(token: str, underlying: str, exchange: str) -> Li
     """
     df = _load_instruments(token)
     if df is None:
+        logger.warning("instrument master not loaded; cannot scan expiries")
         return []
     try:
         u = underlying.upper()
         ex = exchange.upper()
-        cols = {c.lower(): c for c in df.columns}
-        underlying_col = cols.get("underlying_symbol") or cols.get("name")
-        type_col = cols.get("instrument_type")
-        exch_col = cols.get("exchange")
-        expiry_col = cols.get("expiry_date") or cols.get("expiry")
-        if not all([underlying_col, type_col, expiry_col]):
-            return []
-        mask = (
-            df[underlying_col].astype(str).str.upper().eq(u)
-            & df[type_col].astype(str).str.upper().isin(["OPTIDX", "OPTSTK"])
+        cols_lower = {c.lower(): c for c in df.columns}
+        underlying_col = (
+            cols_lower.get("underlying_symbol")
+            or cols_lower.get("underlying")
+            or cols_lower.get("name")
         )
-        if exch_col is not None:
-            mask &= df[exch_col].astype(str).str.upper().eq(ex)
-        sub = df[mask]
+        type_col = (
+            cols_lower.get("instrument_type")
+            or cols_lower.get("type")
+            or cols_lower.get("segment")
+        )
+        exch_col = cols_lower.get("exchange")
+        expiry_col = (
+            cols_lower.get("expiry_date")
+            or cols_lower.get("expiry")
+            or cols_lower.get("expiry_dt")
+        )
+        if not underlying_col or not expiry_col:
+            logger.warning(
+                "instrument master missing keys: underlying_col=%s expiry_col=%s columns=%s",
+                underlying_col, expiry_col, list(df.columns),
+            )
+            return []
+
+        # Filter by underlying first — match common variations.
+        sub = df[df[underlying_col].astype(str).str.upper().eq(u)]
+        if sub.empty:
+            logger.warning(
+                "no rows for underlying=%s in column=%s; sample unique values: %s",
+                u, underlying_col, df[underlying_col].dropna().astype(str).unique()[:10].tolist(),
+            )
+
+        # Apply option-only filter best-effort.
+        # Groww stores option type as `CE`/`PE` per leg, futures as `FUT`,
+        # indices as `IDX` (no `OPTIDX/OPTSTK`).
+        if not sub.empty and type_col is not None:
+            type_upper = sub[type_col].astype(str).str.upper()
+            opt_mask = type_upper.isin(["CE", "PE"])
+            sub_opt = sub[opt_mask]
+            if not sub_opt.empty:
+                sub = sub_opt
+
+        if exch_col is not None and not sub.empty:
+            ex_filter = sub[sub[exch_col].astype(str).str.upper().eq(ex)]
+            if not ex_filter.empty:
+                sub = ex_filter
+
         raw = sub[expiry_col].dropna().astype(str).tolist()
-        # Normalise to ISO YYYY-MM-DD
         out: List[str] = []
         for s in raw:
-            m = re.match(r"^(\d{4}-\d{2}-\d{2})", s)
+            m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
             if m:
                 out.append(m.group(1))
                 continue
-            # Fallback: try common alt formats like DD-MMM-YYYY
-            try:
-                d = datetime.strptime(s.split("T")[0], "%Y-%m-%d").date()
-                out.append(d.isoformat())
-            except Exception:  # noqa: BLE001
-                pass
+            # Fallback: try common alt formats like 12-Jun-2026 or 12-06-2026
+            for fmt in ("%d-%b-%Y", "%d-%m-%Y", "%Y%m%d"):
+                try:
+                    d = datetime.strptime(s.split("T")[0], fmt).date()
+                    out.append(d.isoformat())
+                    break
+                except Exception:  # noqa: BLE001
+                    pass
+        logger.info(
+            "master-scan underlying=%s exchange=%s underlying_col=%s expiry_col=%s type_col=%s rows=%d unique_expiries=%d",
+            u, ex, underlying_col, expiry_col, type_col, len(sub), len(set(out)),
+        )
         return sorted(set(out))
     except Exception as exc:  # noqa: BLE001
-        logger.warning("instrument-master expiry scan failed: %s", exc)
+        logger.exception("instrument-master expiry scan failed: %s", exc)
         return []
+
+
+@api.get("/instruments/master-debug")
+async def instrument_master_debug(token: str = Depends(require_token)):
+    """One-off dev introspection: returns the column list and the first row
+    of the cached instrument master so we can see Groww's actual schema."""
+    if _is_demo(token):
+        return {"demo": True}
+    df = _load_instruments(token)
+    if df is None:
+        return {"error": "master not loaded"}
+    sample = df.head(2).to_dict(orient="records")
+    return {
+        "columns": list(df.columns),
+        "row_count": int(len(df)),
+        "sample": sample,
+    }
 
 
 @api.get("/instruments/expiries")
