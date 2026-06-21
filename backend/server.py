@@ -14,6 +14,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -605,16 +606,44 @@ async def underlyings(q: str = "", token: str = Depends(require_token)):
     return {"items": results[:300]}
 
 
+def _extract_iso_dates(obj: Any) -> List[str]:
+    """Walk any nested dict/list and collect strings that look like ISO dates."""
+    out: List[str] = []
+    iso_re = re.compile(r"^\d{4}-\d{2}-\d{2}")
+    if isinstance(obj, str):
+        if iso_re.match(obj):
+            out.append(obj[:10])
+    elif isinstance(obj, list):
+        for x in obj:
+            out.extend(_extract_iso_dates(x))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            out.extend(_extract_iso_dates(v))
+    return out
+
+
 @api.get("/instruments/expiries")
 async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(require_token)):
     if _is_demo(token):
         return _demo_expiries()
     api_ = _groww_client(token)
-    try:
-        data = await _call_blocking(api_.get_expiries, exchange, underlying)
-        return data
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    # Groww's get_expiries defaults to current year only — pass the current
+    # *and* next year so weeklies that roll into the next calendar year are
+    # included.
+    now = datetime.now(timezone.utc)
+    all_dates: List[str] = []
+    errors: List[str] = []
+    for year in (now.year, now.year + 1):
+        try:
+            data = await _call_blocking(api_.get_expiries, exchange, underlying, year)
+            all_dates.extend(_extract_iso_dates(data))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{year}: {exc}")
+    if not all_dates and errors:
+        raise HTTPException(status_code=502, detail="; ".join(errors))
+    today_iso = now.date().isoformat()
+    future = sorted({d for d in all_dates if d >= today_iso})
+    return {"expiries": future}
 
 
 @api.get("/instruments/option-chain")
