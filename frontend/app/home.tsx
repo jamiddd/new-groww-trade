@@ -415,7 +415,7 @@ export default function Home() {
           <View style={styles.posHeaderRight}>
             <Text style={[styles.posTotal, { color: pnlColor(totalPnl) }]}>
               {pnlSign(totalPnl)}
-              {formatINR(Math.abs(totalPnl))}
+              {formatMoney(Math.abs(totalPnl))}
             </Text>
             <TouchableOpacity
               style={styles.posMenuBtn}
@@ -456,13 +456,13 @@ export default function Home() {
                     <Text style={styles.posSide}> · {side}</Text>
                   </View>
                   <Text style={styles.posMeta}>
-                    Avg. Price - ₹{formatINR(ap)} × {Math.abs(qty)} Qty
+                    Avg. Price - {formatMoney(ap)} × {Math.abs(qty)} Qty
                   </Text>
                   {p.created_at ? <Text style={styles.posTime}>{p.created_at}</Text> : null}
                 </View>
                 <Text style={[styles.posPnl, { color: pnlColor(pnl) }]}>
                   {pnlSign(pnl)}
-                  {formatINR(Math.abs(pnl))}
+                  {formatMoney(Math.abs(pnl))}
                 </Text>
               </TouchableOpacity>
             );
