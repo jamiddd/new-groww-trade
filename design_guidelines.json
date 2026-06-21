@@ -1,0 +1,163 @@
+{
+  "theme": "light",
+  "archetype": "Swiss & High-Contrast (Customized strictly to user image reference)",
+  "global": {
+    "typography": {
+      "primaryFont": "Arial, sans-serif",
+      "rules": [
+        "Headings must be bold and compact.",
+        "Labels and numbers should use tabular-nums where possible.",
+        "Arial is strictly enforced."
+      ]
+    },
+    "colors": {
+      "background": "#FFFFFF",
+      "surface": "#FFFFFF",
+      "text": {
+        "primary": "#000000",
+        "secondary": "#6B7280",
+        "muted": "#9CA3AF"
+      },
+      "brand": {
+        "primary": "#1A4DFF",
+        "primaryDark": "#0F1F4D",
+        "danger": "#EF4444",
+        "dangerDark": "#B91C1C"
+      },
+      "pnl": {
+        "positive": "#1A4DFF",
+        "negative": "#B91C1C"
+      },
+      "border": {
+        "light": "#F3F4F6",
+        "default": "#E5E7EB",
+        "dark": "#9CA3AF"
+      }
+    },
+    "spacing": {
+      "mobileViewport": "max-w-md mx-auto min-h-[100dvh] relative bg-white shadow-xl overflow-hidden flex flex-col",
+      "tapTarget": "min-h-[44px]",
+      "buyButtonHeight": "h-20"
+    }
+  },
+  "components": {
+    "buyGrid": {
+      "layout": "grid grid-cols-2 gap-2 mb-2",
+      "mktButton": {
+        "classes": "flex flex-col items-center justify-center h-20 bg-[#1A4DFF] text-white rounded-md active:bg-[#1A4DFF]/90 transition-colors",
+        "typography": "text-sm font-bold uppercase tracking-wide",
+        "testIdBase": "buy-mkt-button"
+      },
+      "lmtButton": {
+        "classes": "flex flex-col items-center justify-center h-20 bg-[#0F1F4D] text-white rounded-md active:bg-[#0F1F4D]/90 transition-colors",
+        "typography": "text-sm font-bold uppercase tracking-wide",
+        "testIdBase": "buy-lmt-button"
+      }
+    },
+    "exitControls": {
+      "partialRow": "grid grid-cols-2 gap-2 mb-2",
+      "partialButton": {
+        "classes": "flex items-center justify-center h-14 bg-[#B91C1C] text-white font-bold uppercase text-sm rounded-md active:bg-[#B91C1C]/90 transition-colors",
+        "testIdBase": "exit-partial-button"
+      },
+      "allButton": {
+        "classes": "flex items-center justify-center w-full h-14 bg-[#EF4444] text-white font-bold uppercase text-sm rounded-md active:bg-[#EF4444]/90 transition-colors",
+        "testId": "exit-all-positions-button"
+      }
+    },
+    "capitalCard": {
+      "classes": "p-4 bg-white border border-[#E5E7EB] rounded-lg shadow-sm space-y-2 mb-4",
+      "row": "flex justify-between items-baseline",
+      "dottedSeparator": "flex-1 border-b-2 border-dotted border-[#E5E7EB] mx-2 relative top-[-4px]",
+      "label": "text-sm text-[#6B7280]",
+      "value": "text-sm font-bold text-[#000000]",
+      "disclaimer": "text-xs text-[#9CA3AF] mt-2 italic"
+    },
+    "positionRow": {
+      "classes": "py-3 border-b border-[#E5E7EB] flex justify-between items-center",
+      "left": "space-y-1",
+      "right": "text-right",
+      "symbol": "text-sm font-bold",
+      "tag": "text-[10px] px-1.5 py-0.5 rounded bg-[#1A4DFF]/10 text-[#1A4DFF] font-bold inline-block ml-2 uppercase",
+      "details": "text-xs text-[#6B7280]",
+      "pnlPositive": "text-sm font-bold text-[#1A4DFF]",
+      "pnlNegative": "text-sm font-bold text-[#B91C1C]"
+    },
+    "presetRow": {
+      "classes": "flex justify-between items-center py-4 border-b border-[#E5E7EB]",
+      "left": "space-y-1 flex-1 pr-4",
+      "title": "text-xs font-bold text-[#6B7280] uppercase tracking-wider",
+      "description": "text-sm text-[#000000]",
+      "value": "text-sm font-bold text-[#1A4DFF] cursor-pointer"
+    }
+  },
+  "screens": {
+    "login": {
+      "testId": "login-screen",
+      "layout": "flex flex-col justify-center px-6 py-12 flex-1 space-y-6",
+      "requirements": [
+        "API Key Input",
+        "API Secret Input",
+        "TOTP Secret Input",
+        "Save Securely Checkbox/Toggle",
+        "Connect Button (Royal Blue, full width)"
+      ]
+    },
+    "home": {
+      "testId": "home-screen",
+      "layout": "flex flex-col flex-1 relative",
+      "header": {
+        "classes": "flex justify-between items-center p-4 border-b border-[#E5E7EB] bg-white sticky top-0 z-30",
+        "left": "flex items-center gap-1 cursor-pointer font-bold text-lg",
+        "rightIcons": "flex items-center gap-4 text-[#000000]"
+      },
+      "scrollArea": {
+        "classes": "flex-1 overflow-y-auto p-4 pb-6",
+        "testId": "home-scroll-area"
+      },
+      "stickyFooter": {
+        "classes": "sticky bottom-0 w-full bg-white border-t border-[#E5E7EB] p-4 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] z-40",
+        "topBar": "flex justify-between items-center mb-4",
+        "maxLossPill": "px-3 py-1 bg-gray-100 rounded-full text-xs font-bold text-[#000000]",
+        "cePeToggle": "flex items-center gap-2 text-sm font-bold"
+      }
+    },
+    "presetUpdation": {
+      "testId": "preset-screen",
+      "layout": "bg-white flex flex-col flex-1",
+      "header": "text-lg font-bold p-4 border-b border-[#E5E7EB]",
+      "content": "flex-1 overflow-y-auto p-4",
+      "bottomActions": "flex justify-between mt-auto p-4 border-t border-[#E5E7EB]",
+      "deleteBtn": "text-[#9CA3AF] font-bold text-sm uppercase px-4 py-2",
+      "updateBtn": "text-[#1A4DFF] font-bold text-sm uppercase px-4 py-2"
+    },
+    "orderHistory": {
+      "testId": "order-history-screen",
+      "layout": "bg-white flex flex-col flex-1",
+      "listGrouping": "Group by date. Date headers text-xs text-gray-500 uppercase font-bold py-2 bg-gray-50",
+      "statusPills": {
+        "executed": "bg-green-100 text-green-800 text-xs px-2 py-0.5 rounded font-bold",
+        "cancelled": "bg-gray-100 text-gray-800 text-xs px-2 py-0.5 rounded font-bold",
+        "rejected": "bg-red-100 text-[#B91C1C] text-xs px-2 py-0.5 rounded font-bold"
+      }
+    },
+    "settings": {
+      "testId": "settings-screen",
+      "layout": "bg-white flex flex-col flex-1",
+      "content": "p-4 space-y-4 divide-y divide-[#E5E7EB]",
+      "row": "flex justify-between items-center py-4",
+      "rowText": "text-sm font-bold max-w-[80%]",
+      "logoutButton": "mt-8 w-full py-4 text-center text-[#EF4444] font-bold uppercase border border-[#EF4444] rounded-md"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Configure tailwind.config.js to strictly use Arial as the default sans font: `fontFamily: { sans: ['Arial', 'sans-serif'] }`",
+    "CRITICAL: Do NOT use green for positive PnL. Use #1A4DFF (Royal Blue) everywhere for positive PnL to match the provided screenshot reference exactly.",
+    "CRITICAL: Strictly adhere to the Mobile Web App form-factor. Since we use standard web tech, wrap the entire app in `<div className='max-w-md mx-auto min-h-[100dvh] relative bg-white shadow-xl overflow-hidden flex flex-col'>` to simulate the mobile view on desktop browsers.",
+    "Use Shadcn Dialogs, Sheets, or custom bottom-anchored modals for preset edit screens, underlying search, and order confirmations to simulate native mobile bottom sheets.",
+    "Ensure the Buy Grid buttons in the home sticky footer are massive (h-20) and easily tappable, as this is a fast-action scalping utility.",
+    "Use pure CSS dotted borders for the Capital Card rows (`border-bottom: 2px dotted #E5E7EB`).",
+    "Kebab menu should be implemented using Shadcn DropdownMenu on the top right header, containing: Settings, Order History, Refresh, Disconnect.",
+    "Add 'data-testid' to ALL interactive elements as instructed."
+  ]
+}
