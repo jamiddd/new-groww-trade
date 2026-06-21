@@ -267,27 +267,58 @@ def _recompute_position_pnl(p: Dict[str, Any]) -> Dict[str, Any]:
     return p
 
 
+def _demo_margin_base() -> float:
+    """The opening day's balance for a demo account."""
+    return 134890.60
+
+
 async def _save_demo_state(token: str, doc: Dict[str, Any]) -> None:
     user_key = f"demo:{token}"
     await db.demo_state.update_one(
         {"_id": user_key},
-        {"$set": {"positions": doc["positions"], "orders": doc.get("orders", [])}},
+        {"$set": {
+            "positions": doc["positions"],
+            "orders": doc.get("orders", []),
+            "last_walk_ts": doc.get("last_walk_ts", 0),
+        }},
         upsert=True,
     )
 
 
-async def _demo_positions(token: str) -> Dict[str, Any]:
+async def _demo_refresh_state(token: str) -> Dict[str, Any]:
+    """Re-run the LTP/PnL random walk at most twice per second so margin +
+    positions stay consistent within the same client fetch cycle."""
     doc = await _demo_state_for(token)
-    for p in doc["positions"]:
-        _recompute_position_pnl(p)
-    await _save_demo_state(token, doc)
-    # Hide closed (qty=0) rows in the API surface
+    now = time.time()
+    last = doc.get("last_walk_ts", 0)
+    if (now - last) >= 0.5:
+        for p in doc["positions"]:
+            _recompute_position_pnl(p)
+        doc["last_walk_ts"] = now
+        await _save_demo_state(token, doc)
+    return doc
+
+
+async def _demo_positions(token: str) -> Dict[str, Any]:
+    doc = await _demo_refresh_state(token)
     return {"positions": [p for p in doc["positions"] if int(p.get("net_quantity") or 0) != 0]}
 
 
 async def _demo_orders(token: str) -> Dict[str, Any]:
     doc = await _demo_state_for(token)
     return {"orders": list(reversed(doc.get("orders", [])))[:200]}
+
+
+async def _demo_margin_payload(token: str) -> Dict[str, Any]:
+    doc = await _demo_refresh_state(token)
+    total_pnl = sum(float(p.get("pnl") or 0) for p in doc["positions"])
+    balance = round(_demo_margin_base() + total_pnl, 2)
+    return {
+        "equity": {"available_cash": balance, "net_margin_available": balance},
+        "used_margin": 0.0,
+        "available_margin": balance,
+        "net_margin_available": balance,
+    }
 
 
 def _demo_expiries() -> Dict[str, Any]:
@@ -505,13 +536,17 @@ async def server_ip():
 @api.get("/account/margin")
 async def margin(token: str = Depends(require_token)):
     if _is_demo(token):
-        data = _demo_margin()
-    else:
-        api_ = _groww_client(token)
-        try:
-            data = await _call_blocking(api_.get_available_margin_details)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        data = await _demo_margin_payload(token)
+        # In demo mode, capital is a clean constant — never let live PnL
+        # contaminate the start-of-day snapshot.
+        data["opening_capital_today"] = _demo_margin_base()
+        return data
+
+    api_ = _groww_client(token)
+    try:
+        data = await _call_blocking(api_.get_available_margin_details)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Compute total deployable + already-deployed → opening capital snapshot
     # for today. Store it on first observation each day so it stays stable
