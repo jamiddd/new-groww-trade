@@ -135,9 +135,14 @@ export default function Home() {
         ? "BSE"
         : "NSE";
       const res = await api.expiries(u, exch);
-      const exp: string[] = res?.expiries || res?.data || res?.items || [];
-      setExpiryList(Array.isArray(exp) ? exp : []);
-      if (Array.isArray(exp) && exp.length && !expiry) setExpiry(exp[0]);
+      const raw: string[] = res?.expiries || res?.data || res?.items || [];
+      // Keep only today + future ISO dates (compare YYYY-MM-DD lexicographically).
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const exp = (Array.isArray(raw) ? raw : [])
+        .filter((d) => typeof d === "string" && d >= todayIso)
+        .sort();
+      setExpiryList(exp);
+      if (exp.length && !expiry) setExpiry(exp[0]);
     } catch {
       setExpiryList([]);
     }
