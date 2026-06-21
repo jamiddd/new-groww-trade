@@ -25,7 +25,7 @@ Mobile app for one-tap options scalping in the Indian market through the officia
 - `POST /orders/exit` `{percent: 25|50|100}` (places opposite orders for open positions)
 - `GET/PUT /presets`, `GET/PUT /presets/{key}`
 - `GET/PUT /settings`
-- `GET /fx/inr-to-usd` (exchangerate.host, 10-min cache)
+- `GET /fx/inr-to-usd` (open.er-api.com, 10-min cache)
 
 ## Smart preset behaviour
 - On preset tap: backend pulls option chain for `(underlying, expiry)`, picks a strike based on `strike_selection`, applies `iv_filter`, then computes quantity from `capital * position_sizing_pct` divided by `lot_size * ltp`. Confirmation bottom sheet (toggleable in settings) gates the call.

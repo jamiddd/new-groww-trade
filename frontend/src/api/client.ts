@@ -59,7 +59,15 @@ async function req<T = any>(path: string, opts: RequestInit & { auth?: boolean }
     body = text;
   }
   if (!res.ok) {
-    const detail = body?.detail || body?.message || text || `HTTP ${res.status}`;
+    // Some ingress layers (Cloudflare) rewrite upstream 502 bodies into HTML.
+    let detail: string;
+    if (body && typeof body === "object") {
+      detail = body.detail || body.message || JSON.stringify(body);
+    } else if (typeof body === "string" && /^\s*</.test(body)) {
+      detail = res.status === 502 ? "Upstream Groww request failed. Please re-login." : `HTTP ${res.status}`;
+    } else {
+      detail = (body as string) || `HTTP ${res.status}`;
+    }
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   }
   return body as T;
