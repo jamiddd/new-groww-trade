@@ -321,24 +321,22 @@ export default function Home() {
       {/* Sticky header */}
       <View style={styles.header}>
         <TouchableOpacity
-          style={styles.headerLeft}
+          style={styles.headerChip}
           onPress={() => setSearchVisible(true)}
           testID="header-underlying-button"
         >
           <Text style={styles.caret}>▾</Text>
-          <Text style={styles.headerTitle}>
-            {underlying}
-            <Text style={styles.headerExpiry}> · {expiry ? formatExpiry(expiry) : "pick expiry"}</Text>
-          </Text>
+          <Text style={styles.chipText}>{underlying}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.headerChipSecondary}
+          onPress={() => setExpirySheetVisible(true)}
+          testID="header-expiry-button"
+        >
+          <Feather name="calendar" size={13} color={Colors.text} />
+          <Text style={styles.chipText}>{expiry ? formatExpiry(expiry) : "pick expiry"}</Text>
         </TouchableOpacity>
         <View style={styles.headerRight}>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => setSearchVisible(true)}
-            testID="header-add-button"
-          >
-            <Text style={styles.iconText}>+</Text>
-          </TouchableOpacity>
           <TouchableOpacity
             style={styles.iconBtn}
             onPress={() => router.push("/history")}
@@ -547,14 +545,6 @@ export default function Home() {
                 testID="menu-history"
               />
               <MenuItem
-                label="Pick Expiry"
-                onPress={() => {
-                  setMenuVisible(false);
-                  setExpirySheetVisible(true);
-                }}
-                testID="menu-expiry"
-              />
-              <MenuItem
                 label="Settings"
                 onPress={() => {
                   setMenuVisible(false);
@@ -689,16 +679,34 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    padding: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 8,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
     backgroundColor: Colors.bg,
   },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
-  headerTitle: { fontFamily: FONT, fontSize: 16, fontWeight: "bold", color: Colors.text },
-  headerExpiry: { fontFamily: FONT, fontWeight: "normal", color: Colors.textSecondary, fontSize: 13 },
-  caret: { fontSize: 16, color: Colors.text },
+  headerChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: Colors.borderLight,
+    borderRadius: 8,
+  },
+  headerChipSecondary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: Colors.borderLight,
+    borderRadius: 8,
+    flex: 1,
+  },
+  chipText: { fontFamily: FONT, fontSize: 14, fontWeight: "bold", color: Colors.text },
+  caret: { fontSize: 14, color: Colors.text },
   headerRight: { flexDirection: "row", gap: 4 },
   iconBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   iconText: { fontFamily: FONT, color: Colors.text, fontSize: 20, fontWeight: "bold" },

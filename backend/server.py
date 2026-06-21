@@ -622,44 +622,81 @@ def _extract_iso_dates(obj: Any) -> List[str]:
     return out
 
 
+def _live_expiries_from_master(token: str, underlying: str, exchange: str) -> List[str]:
+    """Scan the Groww instrument master for the upcoming option expiries of an
+    underlying. `get_expiries` is historical-only, so this is the only way to
+    surface the live weekly + monthly calendar (e.g., the next NIFTY Tuesday
+    weekly).
+    """
+    df = _load_instruments(token)
+    if df is None:
+        return []
+    try:
+        u = underlying.upper()
+        ex = exchange.upper()
+        cols = {c.lower(): c for c in df.columns}
+        underlying_col = cols.get("underlying_symbol") or cols.get("name")
+        type_col = cols.get("instrument_type")
+        exch_col = cols.get("exchange")
+        expiry_col = cols.get("expiry_date") or cols.get("expiry")
+        if not all([underlying_col, type_col, expiry_col]):
+            return []
+        mask = (
+            df[underlying_col].astype(str).str.upper().eq(u)
+            & df[type_col].astype(str).str.upper().isin(["OPTIDX", "OPTSTK"])
+        )
+        if exch_col is not None:
+            mask &= df[exch_col].astype(str).str.upper().eq(ex)
+        sub = df[mask]
+        raw = sub[expiry_col].dropna().astype(str).tolist()
+        # Normalise to ISO YYYY-MM-DD
+        out: List[str] = []
+        for s in raw:
+            m = re.match(r"^(\d{4}-\d{2}-\d{2})", s)
+            if m:
+                out.append(m.group(1))
+                continue
+            # Fallback: try common alt formats like DD-MMM-YYYY
+            try:
+                d = datetime.strptime(s.split("T")[0], "%Y-%m-%d").date()
+                out.append(d.isoformat())
+            except Exception:  # noqa: BLE001
+                pass
+        return sorted(set(out))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("instrument-master expiry scan failed: %s", exc)
+        return []
+
+
 @api.get("/instruments/expiries")
 async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(require_token)):
     if _is_demo(token):
         return _demo_expiries()
-    api_ = _groww_client(token)
-    # Groww's get_expiries defaults to current year only — pass the current
-    # *and* next year so weeklies that roll into the next calendar year are
-    # included.
-    now = datetime.now(timezone.utc)
-    all_dates: List[str] = []
-    errors: List[str] = []
-    raw_samples: List[Any] = []
-    for year in (now.year, now.year + 1):
-        try:
-            data = await _call_blocking(api_.get_expiries, exchange, underlying, year)
-            raw_samples.append(data)
-            all_dates.extend(_extract_iso_dates(data))
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{year}: {exc}")
-    # Always log the raw shape — invaluable when Groww changes the response
-    # schema. Truncate to keep logs sane.
-    try:
-        sample_repr = str(raw_samples)[:500]
-    except Exception:  # noqa: BLE001
-        sample_repr = "<unreprable>"
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+
+    # PRIMARY: scan the live instrument master (returns *future* expiries).
+    live = await _call_blocking(_live_expiries_from_master, token, underlying, exchange)
+    future = sorted({d for d in live if d >= today_iso})
+
+    # FALLBACK: ask the historical endpoint (rare, but useful for FUTIDX-only
+    # underlyings or if the master CSV failed to load).
+    historical_errors: List[str] = []
+    if not future:
+        api_ = _groww_client(token)
+        now = datetime.now(timezone.utc)
+        all_dates: List[str] = []
+        for year in (now.year, now.year + 1):
+            try:
+                data = await _call_blocking(api_.get_expiries, exchange, underlying, year)
+                all_dates.extend(_extract_iso_dates(data))
+            except Exception as exc:  # noqa: BLE001
+                historical_errors.append(f"{year}: {exc}")
+        future = sorted({d for d in all_dates if d >= today_iso})
+
     logger.info(
-        "groww.expiries underlying=%s exchange=%s years=%s errors=%s extracted=%d sample=%s",
-        underlying,
-        exchange,
-        (now.year, now.year + 1),
-        errors,
-        len(all_dates),
-        sample_repr,
+        "expiries underlying=%s exchange=%s live=%d future=%d historical_errors=%s",
+        underlying, exchange, len(live), len(future), historical_errors,
     )
-    if not all_dates and errors:
-        raise HTTPException(status_code=502, detail="; ".join(errors))
-    today_iso = now.date().isoformat()
-    future = sorted({d for d in all_dates if d >= today_iso})
     return {"expiries": future}
 
 
