@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only smoke + contract tests against the deployed ScalpX FastAPI service. 27/27 tests pass. Verified: /api/ health; /api/presets list+single+404+PUT-persist (all 4 default keys present with required fields); /api/settings defaults and PUT-persist; /api/fx/inr-to-usd returns a positive numeric rate via open.er-api.com; /api/auth/login with garbage credentials returns 401 with detail starting 'Groww login failed:' (SDK call is wired); every protected /api/account/*, /api/instruments/{expiries,option-chain}, /api/auth/verify, /api/orders/{place-preset,exit} returns 401 'Missing X-Groww-Token header' without the header; with a fake X-Groww-Token, downstream Groww calls return clean JSON 401/502 (verified directly against the in-cluster URL http://localhost:8001 because the Cloudflare-fronted preview URL rewrites upstream 502s into HTML — backend itself is clean). /api/instruments/underlyings gracefully falls back to the static index list (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX, BANKEX) when the Groww CSV cannot be loaded.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/instruments/underlyings", "issue": "The instrument-master cache (_INSTRUMENTS_CACHE) is process-global and not keyed by token/identity. In a multi-user deployment, one user's CSV would leak to another. Acceptable for the documented single-user app, but worth a comment in code."},
+      {"endpoint": "Cloudflare ingress", "issue": "Backend correctly returns JSON 502 for upstream Groww failures, but the public Cloudflare-fronted host (quick-trade-73.preview.emergentagent.com) rewrites 502 responses into an HTML error page. Mobile clients should treat 502 as 'upstream failed, try again' rather than parse the body. Not fixable from FastAPI."},
+      {"endpoint": "PRD vs code", "issue": "PRD.md says FX provider is exchangerate.host but code (correctly per latest request) uses open.er-api.com. PRD wording should be updated for accuracy."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_backend.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Optional: add a docstring/comment near _INSTRUMENTS_CACHE noting it is single-user scope.",
+    "Optional: update PRD.md FX provider line from exchangerate.host to open.er-api.com to match implementation.",
+    "Real-credential paths (login success, account margin/positions/orders, expiries, option-chain, place-preset, exit) cannot be exercised here — user must validate end-to-end with their own Groww API key + TOTP secret from the Login screen."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 619 lines but cohesive; if it grows further consider splitting into routers (auth/account/instruments/orders/presets/settings).",
+    "_groww_client(token) constructs GrowwAPI per request — fine, but each call adds latency. Caching by token hash with a short TTL could speed up bursts.",
+    "All endpoints use _call_blocking(asyncio.to_thread) correctly to keep the event loop responsive while the sync growwapi SDK runs.",
+    "Pydantic models validate all bodies; no raw dict ingestion. MongoDB _id is consistently excluded from responses ({'_id': 0} projection). Good."
+  ],
+  "updated_files": ["/app/backend/tests/test_backend.py"],
+  "success_rate": {"backend": "100%", "frontend": "n/a"},
+  "seed_data_creation": "None. Tests use the seeded defaults from startup. Test mutations on presets and settings are restored at end of each test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth-protected Groww paths cannot be exercised without a real Groww API key + base32 TOTP secret. For the deployed URL, Cloudflare rewrites 502 bodies into HTML — assert against http://localhost:8001 when you need to validate the JSON error envelope. Test file at /app/backend/tests/test_backend.py is the regression suite.",
+  "rca_of_issue": "n/a — no bugs to RCA. Initial test failures were caused by (a) Cloudflare ingress rewriting upstream 502s to HTML on the public URL, mitigated by hitting the in-cluster URL for those specific assertions; backend itself returns clean JSON in all paths."
+}

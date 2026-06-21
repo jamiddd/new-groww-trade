@@ -1,0 +1,158 @@
+import { useCallback, useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+
+import { api } from "@/src/api/client";
+import { Colors, FONT } from "@/src/theme";
+
+type OrderRow = {
+  order_id?: string;
+  trading_symbol?: string;
+  symbol?: string;
+  transaction_type?: string;
+  order_status?: string;
+  status?: string;
+  quantity?: number;
+  filled_quantity?: number;
+  average_price?: number;
+  price?: number;
+  order_type?: string;
+  created_at?: string;
+  exchange_time?: string;
+  exchange?: string;
+};
+
+const STATUS_PILLS: Record<string, { bg: string; fg: string }> = {
+  EXECUTED: { bg: "rgba(26,77,255,0.08)", fg: Colors.primary },
+  COMPLETE: { bg: "rgba(26,77,255,0.08)", fg: Colors.primary },
+  PENDING: { bg: "rgba(0,0,0,0.05)", fg: Colors.textSecondary },
+  CANCELLED: { bg: "rgba(0,0,0,0.05)", fg: Colors.textSecondary },
+  REJECTED: { bg: "rgba(185,28,28,0.08)", fg: Colors.dangerDark },
+  FAILED: { bg: "rgba(185,28,28,0.08)", fg: Colors.dangerDark },
+};
+
+export default function History() {
+  const router = useRouter();
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await api.orders();
+      const list: OrderRow[] = res?.orders || res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setOrders(list);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load orders");
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      await load();
+      setLoading(false);
+    })();
+  }, [load]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="order-history-screen">
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} testID="history-back">
+          <Text style={styles.headerBack}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>ORDER HISTORY</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      {loading ? (
+        <ActivityIndicator color={Colors.primary} style={{ marginTop: 32 }} />
+      ) : error ? (
+        <Text style={styles.error}>{error}</Text>
+      ) : (
+        <FlatList
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+          data={orders}
+          keyExtractor={(item, i) => item.order_id || `${item.trading_symbol}-${i}`}
+          renderItem={({ item, index }) => {
+            const status = (item.order_status || item.status || "").toUpperCase();
+            const pill = STATUS_PILLS[status] || { bg: "rgba(0,0,0,0.05)", fg: Colors.textSecondary };
+            const sym = item.trading_symbol || item.symbol || "—";
+            const side = item.transaction_type || "—";
+            const qty = item.filled_quantity ?? item.quantity ?? 0;
+            const px = item.average_price ?? item.price ?? 0;
+            return (
+              <View style={styles.row} testID={`order-row-${index}`}>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.rowTop}>
+                    <Text style={styles.sym}>{sym}</Text>
+                    <Text style={[styles.side, side === "SELL" && { color: Colors.danger }]}>{side}</Text>
+                  </View>
+                  <Text style={styles.meta}>
+                    {item.order_type || "—"} · Qty {qty} · ₹{Number(px).toFixed(2)}
+                  </Text>
+                  {item.exchange_time || item.created_at ? (
+                    <Text style={styles.time}>{item.exchange_time || item.created_at}</Text>
+                  ) : null}
+                </View>
+                <View style={[styles.pill, { backgroundColor: pill.bg }]}>
+                  <Text style={[styles.pillText, { color: pill.fg }]}>{status || "—"}</Text>
+                </View>
+              </View>
+            );
+          }}
+          ListEmptyComponent={<Text style={styles.empty}>No orders yet.</Text>}
+          contentContainerStyle={orders.length === 0 ? { flex: 1, justifyContent: "center" } : {}}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: Colors.bg },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  headerBack: { fontFamily: FONT, color: Colors.text, fontSize: 20, fontWeight: "bold" },
+  headerTitle: { fontFamily: FONT, color: Colors.text, fontWeight: "bold", fontSize: 14, letterSpacing: 1, flex: 1, textAlign: "center" },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderLight,
+  },
+  rowTop: { flexDirection: "row", alignItems: "center", gap: 8 },
+  sym: { fontFamily: FONT, fontWeight: "bold", color: Colors.text, fontSize: 13 },
+  side: { fontFamily: FONT, fontWeight: "bold", fontSize: 11, color: Colors.primary, letterSpacing: 0.6 },
+  meta: { fontFamily: FONT, fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  time: { fontFamily: FONT, fontSize: 10, color: Colors.textMuted, marginTop: 2 },
+  pill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  pillText: { fontFamily: FONT, fontSize: 10, fontWeight: "bold", letterSpacing: 0.6 },
+  empty: { fontFamily: FONT, textAlign: "center", color: Colors.textMuted },
+  error: { fontFamily: FONT, color: Colors.dangerDark, textAlign: "center", marginTop: 24 },
+});
