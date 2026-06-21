@@ -11,6 +11,7 @@ ScalpX backend — Groww options scalping API.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import math
 import os
@@ -484,13 +485,47 @@ async def server_ip():
 @api.get("/account/margin")
 async def margin(token: str = Depends(require_token)):
     if _is_demo(token):
-        return _demo_margin()
-    api_ = _groww_client(token)
+        data = _demo_margin()
+    else:
+        api_ = _groww_client(token)
+        try:
+            data = await _call_blocking(api_.get_available_margin_details)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Compute total deployable + already-deployed → opening capital snapshot
+    # for today. Store it on first observation each day so it stays stable
+    # even as positions / PnL move during the day.
+    eq = (
+        (data.get("equity") or {}).get("available_cash")
+        if isinstance(data, dict)
+        else None
+    )
+    if eq is None and isinstance(data, dict):
+        eq = (
+            data.get("available_margin")
+            or data.get("net_margin_available")
+            or data.get("cash")
+            or data.get("net")
+            or 0
+        )
+    used = 0
+    if isinstance(data, dict):
+        used = data.get("used_margin") or data.get("margin_used") or 0
     try:
-        data = await _call_blocking(api_.get_available_margin_details)
-        return data
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        total_now = float(eq or 0) + float(used or 0)
+    except Exception:  # noqa: BLE001
+        total_now = 0.0
+
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    user_key = f"demo:{DEMO_TOKEN}" if _is_demo(token) else hashlib.sha256(token.encode()).hexdigest()[:24]
+    snap = await db.opening_capital.find_one({"user": user_key, "date": today_iso}, {"_id": 0})
+    if not snap and total_now > 0:
+        snap = {"user": user_key, "date": today_iso, "capital": total_now}
+        await db.opening_capital.insert_one(snap)
+    if isinstance(data, dict):
+        data["opening_capital_today"] = float(snap["capital"]) if snap else total_now
+    return data
 
 
 @api.get("/account/positions")

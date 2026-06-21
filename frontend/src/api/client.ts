@@ -27,6 +27,7 @@ export type AppSettings = {
 };
 
 const TOKEN_KEY = "groww_access_token";
+const AUTO_LOGIN_PROFILE_KEY = "auto_login_profile_id";
 
 export async function getToken(): Promise<string | null> {
   return storage.secureGet<string>(TOKEN_KEY, "" as string).then((v) => v || null);
@@ -38,6 +39,24 @@ export async function setToken(token: string): Promise<void> {
 
 export async function clearToken(): Promise<void> {
   await storage.secureRemove(TOKEN_KEY);
+}
+
+/**
+ * Full logout: clears the token AND disables auto-login by removing both the
+ * locally-saved profile id and (best-effort) the encrypted server-side
+ * device-token profile. After this, the user must re-enter credentials.
+ */
+export async function disconnect(): Promise<void> {
+  const profileId = await storage.getItem<string>(AUTO_LOGIN_PROFILE_KEY, "" as string);
+  if (profileId) {
+    try {
+      await req(`/auth/profiles/${profileId}`, { method: "DELETE", auth: false });
+    } catch {
+      // best effort — the local removal below is what actually stops auto-login
+    }
+    await storage.removeItem(AUTO_LOGIN_PROFILE_KEY);
+  }
+  await clearToken();
 }
 
 async function req<T = any>(path: string, opts: RequestInit & { auth?: boolean } = {}): Promise<T> {

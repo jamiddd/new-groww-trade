@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
-import { api, AppSettings, clearToken } from "@/src/api/client";
+import { api, AppSettings, disconnect } from "@/src/api/client";
 import { Colors, FONT } from "@/src/theme";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
 
@@ -46,7 +46,7 @@ export default function SettingsScreen() {
   };
 
   const logout = async () => {
-    await clearToken();
+    await disconnect();
     router.replace("/login");
   };
 

@@ -16,7 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 
-import { api, clearToken, AppSettings } from "@/src/api/client";
+import { api, disconnect, AppSettings } from "@/src/api/client";
 import { Colors, FONT } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 import { formatExpiry } from "@/src/utils/format";
@@ -163,8 +163,15 @@ export default function Home() {
         m?.net ??
         0;
       const used = m?.used_margin ?? m?.margin_used ?? 0;
+      const opening = m?.opening_capital_today;
       setBalance(Number(eq) || 0);
-      setCapital((Number(eq) || 0) + (Number(used) || 0));
+      // Capital = opening balance of the day (snapshotted server-side on the
+      // first margin call of the day) so it doesn't shift as positions move.
+      setCapital(
+        opening !== undefined && opening !== null
+          ? Number(opening) || 0
+          : (Number(eq) || 0) + (Number(used) || 0),
+      );
       const positionsList: Position[] =
         p?.positions || p?.data || p?.items || (Array.isArray(p) ? p : []);
       setPositions(positionsList.filter((x) => (x.net_quantity || x.quantity || 0) !== 0));
@@ -306,7 +313,7 @@ export default function Home() {
   };
 
   const onDisconnect = async () => {
-    await clearToken();
+    await disconnect();
     router.replace("/login");
   };
 
