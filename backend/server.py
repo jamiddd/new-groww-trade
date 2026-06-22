@@ -949,34 +949,91 @@ def _pick_strike(rows: List[Dict[str, Any]], spot: float, opt_type: str, strateg
     return filtered[idx]
 
 
-async def _fetch_spot_ltp(api_: GrowwAPI, underlying: str, exchange: str) -> float:
-    """Best-effort fetch of the underlying index/stock spot LTP.
+def _first_positive_numeric(obj: Any) -> Optional[float]:
+    """Return the first positive numeric value found in a dict/list — used
+    when the API returns `{trading_symbol: price}` (the key IS the symbol so
+    key-substring probing doesn't match)."""
+    if isinstance(obj, (int, float)):
+        try:
+            v = float(obj)
+            return v if v > 0 else None
+        except Exception:  # noqa: BLE001
+            return None
+    if isinstance(obj, dict):
+        for v in obj.values():
+            r = _first_positive_numeric(v)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _first_positive_numeric(v)
+            if r is not None:
+                return r
+    return None
 
-    For NSE indices the Groww convention is `exchange_trading_symbol = NSE_NIFTY`
-    and segment `CASH`. Returns 0.0 on any failure (caller falls back further).
-    """
+
+async def _fetch_spot_ltp(api_: GrowwAPI, underlying: str, exchange: str) -> float:
+    """Best-effort fetch of the underlying index/stock spot LTP. Tries
+    multiple symbol/segment variants; returns 0.0 on total failure."""
     candidates = [
         (f"{exchange}_{underlying}", "CASH"),
-        (f"{exchange}_{underlying} 50", "CASH"),  # NSE_NIFTY 50
+        (f"{exchange}_{underlying} 50", "CASH"),
+        (f"{exchange}_{underlying}", "FNO"),
     ]
     for symbol, segment in candidates:
         try:
             data = await _call_blocking(api_.get_ltp, (symbol,), segment)
-            ltp = _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"]) or 0.0
-            if ltp > 0:
+            # `get_ltp` returns `{symbol: ltp}` — the trading symbol IS the
+            # key, so look for any positive numeric value.
+            ltp = (
+                _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"])
+                or _first_positive_numeric(data)
+            )
+            if ltp and ltp > 0:
+                logger.info("spot ltp %s via %s/%s = %s", underlying, symbol, segment, ltp)
                 return float(ltp)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("spot ltp %s/%s failed: %s", symbol, segment, exc)
             continue
+    # Final fallback: ask get_quote (richer payload).
+    try:
+        data = await _call_blocking(api_.get_quote, underlying, exchange, "CASH")
+        ltp = (
+            _find_numeric_by_keys(data, ["last_price", "ltp", "last_traded_price"])
+            or _first_positive_numeric(data)
+        )
+        if ltp and ltp > 0:
+            return float(ltp)
+    except Exception:  # noqa: BLE001
+        pass
     return 0.0
 
 
 async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) -> float:
+    sym = f"{exchange}_{trading_symbol}"
     try:
-        data = await _call_blocking(api_.get_ltp, (f"{exchange}_{trading_symbol}",), "FNO")
-        ltp = _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"]) or 0.0
-        return float(ltp)
-    except Exception:  # noqa: BLE001
-        return 0.0
+        data = await _call_blocking(api_.get_ltp, (sym,), "FNO")
+        ltp = (
+            _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"])
+            or _first_positive_numeric(data)
+        )
+        if ltp and ltp > 0:
+            logger.info("option ltp %s = %s", trading_symbol, ltp)
+            return float(ltp)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("option ltp %s failed: %s", trading_symbol, exc)
+    # Fallback: get_quote
+    try:
+        data = await _call_blocking(api_.get_quote, trading_symbol, exchange, "FNO")
+        ltp = (
+            _find_numeric_by_keys(data, ["last_price", "ltp", "last_traded_price"])
+            or _first_positive_numeric(data)
+        )
+        if ltp and ltp > 0:
+            return float(ltp)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("option quote %s failed: %s", trading_symbol, exc)
+    return 0.0
 
 
 def _fallback_pick_from_master(
