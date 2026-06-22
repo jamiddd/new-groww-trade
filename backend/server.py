@@ -1380,7 +1380,18 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     try:
         resp = await _call_blocking(api_.place_order, **order_payload)
     except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
         logger.exception("Order placement failed for %s: %s", order_payload.get("trading_symbol"), exc)
+        if "unregistered ip" in msg.lower():
+            ip = _IP_CACHE.get("ip") or "unknown"
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Groww rejected the order: server IP {ip} is not whitelisted. "
+                    "Add it under groww.in → Profile → Trading API → IP Restrictions, "
+                    "then try again."
+                ),
+            ) from exc
         raise HTTPException(status_code=502, detail=f"Order placement failed: {exc}") from exc
     logger.info("groww place_order resp: %s", resp)
 
