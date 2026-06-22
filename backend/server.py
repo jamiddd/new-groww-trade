@@ -1376,10 +1376,13 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             "fallback_reason": fallback_reason,
         }
 
+    logger.info("placing order: %s", order_payload)
     try:
         resp = await _call_blocking(api_.place_order, **order_payload)
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Order placement failed for %s: %s", order_payload.get("trading_symbol"), exc)
         raise HTTPException(status_code=502, detail=f"Order placement failed: {exc}") from exc
+    logger.info("groww place_order resp: %s", resp)
 
     # Log to mongo
     await db.order_logs.insert_one({
