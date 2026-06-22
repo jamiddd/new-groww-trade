@@ -21,6 +21,7 @@ import { Colors, FONT } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 import { formatExpiry } from "@/src/utils/format";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
+import OrderConfirmSheet, { OrderPreview } from "@/src/components/OrderConfirmSheet";
 import UnderlyingSearchSheet from "@/src/components/UnderlyingSearchSheet";
 import BottomSheet from "@/src/components/BottomSheet";
 
@@ -90,6 +91,8 @@ export default function Home() {
   const [maxLossInput, setMaxLossInput] = useState("40000");
   const [expirySheetVisible, setExpirySheetVisible] = useState(false);
   const [confirmPreset, setConfirmPreset] = useState<PresetSummary | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [preview, setPreview] = useState<OrderPreview | null>(null);
   const [confirmExit, setConfirmExit] = useState<25 | 50 | 100 | null>(null);
   const [singlePos, setSinglePos] = useState<Position | null>(null);
   const [posMenuVisible, setPosMenuVisible] = useState(false);
@@ -236,6 +239,21 @@ export default function Home() {
     }
     if (settings?.confirm_before_order) {
       setConfirmPreset(preset);
+      setPreview(null);
+      setPreviewLoading(true);
+      api
+        .placePreset({
+          preset_key: preset.key,
+          underlying,
+          expiry,
+          option_type: optionType,
+          capital,
+          exchange: ["SENSEX", "BANKEX"].includes(underlying) ? "BSE" : "NSE",
+          dry_run: true,
+        })
+        .then((res) => setPreview(res as OrderPreview))
+        .catch((e: any) => showToast(`Preview failed: ${e?.message ?? "error"}`))
+        .finally(() => setPreviewLoading(false));
     } else {
       placePreset(preset);
     }
@@ -244,6 +262,7 @@ export default function Home() {
   const placePreset = async (preset: PresetSummary) => {
     setPlacing(true);
     setConfirmPreset(null);
+    setPreview(null);
     try {
       const res = await api.placePreset({
         preset_key: preset.key,
@@ -665,15 +684,21 @@ export default function Home() {
       </BottomSheet>
 
       {/* Order confirm */}
-      <ConfirmSheet
+      <OrderConfirmSheet
         visible={!!confirmPreset}
-        title={confirmPreset?.label ?? ""}
-        message={`Underlying: ${underlying} · Expiry: ${expiry ? formatExpiry(expiry) : "?"} · Side: ${optionType}`}
-        confirmLabel={placing ? "PLACING…" : "PLACE ORDER"}
-        cancelLabel="CANCEL"
+        preview={preview}
+        loading={previewLoading}
+        placing={placing}
+        presetLabel={(confirmPreset?.label ?? "").replace("CALL", optionType === "CE" ? "CALL" : "PUT")}
+        underlying={underlying}
+        expiry={expiry ? formatExpiry(expiry) : "?"}
+        optionType={optionType}
+        formatMoney={formatMoney}
         onConfirm={() => confirmPreset && placePreset(confirmPreset)}
-        onCancel={() => setConfirmPreset(null)}
-        testID="confirm-place"
+        onCancel={() => {
+          setConfirmPreset(null);
+          setPreview(null);
+        }}
       />
 
       {/* Exit confirm */}

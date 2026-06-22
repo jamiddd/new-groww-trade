@@ -953,10 +953,8 @@ def _pick_strike(rows: List[Dict[str, Any]], spot: float, opt_type: str, strateg
 async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depends(require_token)):
     # Demo mode: stateful — actually mutate db.demo_state
     if _is_demo(token):
-        doc = await _demo_state_for(token)
-        # Approximate ATM for the selected underlying. Real ATM comes from
-        # the live option chain; demo uses a sensible spot per symbol so
-        # different underlyings produce realistic-looking trading symbols.
+        # Compute deterministic-ish demo strike + lot info before deciding
+        # whether to actually mutate state.
         atm_map = {
             "NIFTY": 24700,
             "BANKNIFTY": 51100,
@@ -974,19 +972,41 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         step = atm_step_map.get(u, 50)
         offsets = {"ATM": 0, "OTM1": step, "OTM2": 2 * step, "ITM1": -step, "HIGH_GAMMA": 0}
         preset_doc = await db.presets.find_one({"key": payload.preset_key}, {"_id": 0})
-        sizing = float(((preset_doc or {}).get("position_sizing_pct") or 25)) / 100.0
-        strike_off = offsets.get((preset_doc or {}).get("strike_selection", "ATM"), 0)
+        if not preset_doc:
+            preset = next((p for p in DEFAULT_PRESETS if p.key == payload.preset_key), None)
+            if preset:
+                preset_doc = preset.model_dump()
+            else:
+                preset_doc = {}
+        sizing = float(preset_doc.get("position_sizing_pct") or 25) / 100.0
+        strike_off = offsets.get(preset_doc.get("strike_selection", "ATM"), 0)
         strike = atm + strike_off if payload.option_type == "CE" else atm - strike_off
         fake_symbol = f"{u}{strike}{payload.option_type}"
         ltp = round(random.uniform(80, 200), 2)
         lot = 75 if u == "NIFTY" else (35 if u == "BANKNIFTY" else 50)
         lots = max(1, math.floor((payload.capital * sizing) / (ltp * lot)))
         qty = lots * lot
+        order_type_str = preset_doc.get("order_type", "MARKET")
 
-        # Each trade is recorded as its own position row — Groww-style.
-        # We never merge with an existing row, so the user can track every
-        # entry independently. Append a small disambiguator to the symbol
-        # so duplicates with the same strike remain distinct in the UI.
+        if payload.dry_run:
+            return {
+                "dry_run": True,
+                "preset": preset_doc,
+                "selected": {"trading_symbol": fake_symbol, "strike": strike, "ltp": ltp},
+                "quantity": qty,
+                "lots": lots,
+                "lot_size": lot,
+                "estimated_cost": round(qty * ltp, 2),
+                "spot": atm,
+                "order": {
+                    "trading_symbol": fake_symbol,
+                    "transaction_type": "BUY",
+                    "order_type": order_type_str,
+                    "price": 0 if order_type_str == "MARKET" else round(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100), 1),
+                },
+            }
+
+        doc = await _demo_state_for(token)
         suffix_count = sum(
             1 for p in doc["positions"] if (p.get("trading_symbol") or "").startswith(fake_symbol)
         )
@@ -1010,16 +1030,18 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             "quantity": qty,
             "filled_quantity": qty,
             "average_price": ltp,
-            "order_type": (preset_doc or {}).get("order_type", "MARKET"),
+            "order_type": order_type_str,
             "exchange_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         })
         await _save_demo_state(token, doc)
         return {
+            "preset": preset_doc,
             "selected": {"trading_symbol": unique_symbol, "strike": strike, "ltp": ltp},
             "quantity": qty,
             "lots": lots,
             "lot_size": lot,
-            "order": {"trading_symbol": unique_symbol, "transaction_type": "BUY", "order_type": (preset_doc or {}).get("order_type", "MARKET")},
+            "estimated_cost": round(qty * ltp, 2),
+            "order": {"trading_symbol": unique_symbol, "transaction_type": "BUY", "order_type": order_type_str},
             "response": {"order_id": order_id, "status": "EXECUTED"},
             "demo": True,
         }
@@ -1093,10 +1115,12 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     if payload.dry_run:
         return {
             "dry_run": True,
+            "preset": preset_doc,
             "selected": pick,
             "quantity": quantity,
             "lot_size": lot_size,
             "lots": lots,
+            "estimated_cost": round(quantity * float(pick.get("ltp") or 0), 2),
             "order": order_payload,
             "spot": spot,
         }
