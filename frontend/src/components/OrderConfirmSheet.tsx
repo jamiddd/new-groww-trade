@@ -85,6 +85,8 @@ export default function OrderConfirmSheet({
                   ? "No strike matched the preset's IV/strategy filters exactly. Showing closest ATM strike — adjust the preset for stricter matching."
                   : preview.fallback_reason === "no_contracts_found"
                   ? "No live option contracts found for this underlying + expiry. Pick a different expiry."
+                  : preview.fallback_reason === "insufficient_capital"
+                  ? "Capital × position-sizing % can't cover even one lot at the current LTP. Increase capital, sizing %, or pick a cheaper strike."
                   : preview.error
                   ? `Preview error: ${preview.error}`
                   : "Could not build a full preview — review carefully before placing."}
@@ -130,9 +132,13 @@ export default function OrderConfirmSheet({
           <Text style={styles.cancelText}>CANCEL</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.btn, styles.confirmBtn, (placing || loading) && { opacity: 0.6 }]}
+          style={[
+            styles.btn,
+            styles.confirmBtn,
+            (placing || loading || qty < 1 || !sel.trading_symbol) && { opacity: 0.4 },
+          ]}
           onPress={onConfirm}
-          disabled={placing || loading}
+          disabled={placing || loading || qty < 1 || !sel.trading_symbol}
           testID="order-confirm-place"
         >
           {placing ? <ActivityIndicator color="#FFF" /> : <Text style={styles.confirmText}>PLACE ORDER</Text>}

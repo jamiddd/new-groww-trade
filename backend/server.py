@@ -1041,9 +1041,32 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         fake_symbol = f"{u}{strike}{payload.option_type}"
         ltp = round(random.uniform(80, 200), 2)
         lot = 75 if u == "NIFTY" else (35 if u == "BANKNIFTY" else 50)
-        lots = max(1, math.floor((payload.capital * sizing) / (ltp * lot)))
+        contract_cost = ltp * lot
+        lots = math.floor((payload.capital * sizing) / contract_cost) if contract_cost > 0 else 0
         qty = lots * lot
         order_type_str = preset_doc.get("order_type", "MARKET")
+
+        # Refuse to oversize.
+        if lots < 1:
+            if payload.dry_run:
+                return {
+                    "dry_run": True,
+                    "preset": preset_doc,
+                    "selected": {"trading_symbol": fake_symbol, "strike": strike, "ltp": ltp},
+                    "quantity": 0,
+                    "lots": 0,
+                    "lot_size": lot,
+                    "estimated_cost": round(contract_cost, 2),
+                    "spot": atm,
+                    "fallback_reason": "insufficient_capital",
+                }
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Capital ₹{payload.capital:.0f} × sizing {preset_doc.get('position_sizing_pct')}%"
+                    f" can't cover 1 lot of {fake_symbol} (≈ ₹{contract_cost:.0f}). Increase capital or sizing."
+                ),
+            )
 
         if payload.dry_run:
             return {
@@ -1180,8 +1203,32 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         except Exception:  # noqa: BLE001
             pass
     contract_cost = max(0.01, pick["ltp"]) * lot_size
-    lots = max(1, math.floor(risk_capital / contract_cost)) if contract_cost > 0 else 1
+    lots = math.floor(risk_capital / contract_cost) if contract_cost > 0 else 0
     quantity = lots * lot_size
+
+    # Refuse to size beyond capital. For dry-run we still render the preview
+    # with qty=0 + a warning; for a real order we hard-fail.
+    if lots < 1:
+        if payload.dry_run:
+            return {
+                "dry_run": True,
+                "preset": preset_doc,
+                "selected": pick,
+                "quantity": 0,
+                "lots": 0,
+                "lot_size": lot_size,
+                "estimated_cost": round(contract_cost, 2),
+                "spot": spot,
+                "fallback_reason": "insufficient_capital",
+            }
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Capital ₹{payload.capital:.0f} × sizing {preset_doc['position_sizing_pct']}%"
+                f" = ₹{risk_capital:.0f} cannot cover 1 lot of {pick['trading_symbol']}"
+                f" (lot cost ≈ ₹{contract_cost:.0f}). Increase capital or sizing."
+            ),
+        )
 
     order_type = preset_doc["order_type"]
     price = 0.0
