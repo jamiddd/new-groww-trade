@@ -533,12 +533,32 @@ async def server_ip():
 # ---------------------------------------------------------------------------
 # Account
 # ---------------------------------------------------------------------------
+def _find_numeric_by_keys(obj: Any, key_subs: List[str]) -> Optional[float]:
+    """Recursively search a dict/list for a numeric value whose key (any
+    parent in the path is fine) contains any of the given substrings."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (int, float)) and any(s in k.lower() for s in key_subs):
+                try:
+                    return float(v)
+                except Exception:  # noqa: BLE001
+                    pass
+        for v in obj.values():
+            r = _find_numeric_by_keys(v, key_subs)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _find_numeric_by_keys(v, key_subs)
+            if r is not None:
+                return r
+    return None
+
+
 @api.get("/account/margin")
 async def margin(token: str = Depends(require_token)):
     if _is_demo(token):
         data = await _demo_margin_payload(token)
-        # In demo mode, capital is a clean constant — never let live PnL
-        # contaminate the start-of-day snapshot.
         data["opening_capital_today"] = _demo_margin_base()
         return data
 
@@ -548,38 +568,30 @@ async def margin(token: str = Depends(require_token)):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Compute total deployable + already-deployed → opening capital snapshot
-    # for today. Store it on first observation each day so it stays stable
-    # even as positions / PnL move during the day.
+    # Defensive extraction — Groww's `/margins/detail/user` returns
+    # `equity_margin_details.{clear_cash, net_margin_used, ...}` (and
+    # similarly for commodity / collateral). Walk the response recursively.
     eq = (
-        (data.get("equity") or {}).get("available_cash")
-        if isinstance(data, dict)
-        else None
+        _find_numeric_by_keys(data, ["available_cash", "clear_cash", "available_margin", "net_margin_available", "cash_available"]) or 0.0
     )
-    if eq is None and isinstance(data, dict):
-        eq = (
-            data.get("available_margin")
-            or data.get("net_margin_available")
-            or data.get("cash")
-            or data.get("net")
-            or 0
-        )
-    used = 0
-    if isinstance(data, dict):
-        used = data.get("used_margin") or data.get("margin_used") or 0
-    try:
-        total_now = float(eq or 0) + float(used or 0)
-    except Exception:  # noqa: BLE001
-        total_now = 0.0
+    used = (
+        _find_numeric_by_keys(data, ["net_margin_used", "used_margin", "margin_used", "utilised"]) or 0.0
+    )
+    total_now = float(eq) + float(used)
+    logger.info("margin extract: cash=%s used=%s total_now=%s keys=%s", eq, used, total_now, list(data.keys()) if isinstance(data, dict) else type(data))
 
     today_iso = datetime.now(timezone.utc).date().isoformat()
-    user_key = f"demo:{DEMO_TOKEN}" if _is_demo(token) else hashlib.sha256(token.encode()).hexdigest()[:24]
+    user_key = hashlib.sha256(token.encode()).hexdigest()[:24]
     snap = await db.opening_capital.find_one({"user": user_key, "date": today_iso}, {"_id": 0})
     if not snap and total_now > 0:
         snap = {"user": user_key, "date": today_iso, "capital": total_now}
         await db.opening_capital.insert_one(snap)
     if isinstance(data, dict):
         data["opening_capital_today"] = float(snap["capital"]) if snap else total_now
+        # Mirror the canonical fields the frontend reads, so legacy probes
+        # also work cleanly.
+        data.setdefault("available_margin", eq)
+        data.setdefault("used_margin", used)
     return data
 
 
