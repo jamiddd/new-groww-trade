@@ -406,7 +406,7 @@ export default function Home() {
             onPress={() => router.push("/history")}
             testID="header-history-button"
           >
-            <Text style={styles.iconText}>⟳</Text>
+            <Feather name="clock" size={18} color={Colors.text} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.iconBtn}
