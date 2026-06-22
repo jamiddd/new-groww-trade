@@ -949,6 +949,63 @@ def _pick_strike(rows: List[Dict[str, Any]], spot: float, opt_type: str, strateg
     return filtered[idx]
 
 
+def _fallback_pick_from_master(
+    token: str,
+    underlying: str,
+    expiry: str,
+    option_type: str,
+    strategy: str,
+) -> Optional[Dict[str, Any]]:
+    """Build a best-effort strike pick from the instrument-master CSV when
+    Groww's option-chain endpoint fails or returns nothing matching the
+    preset criteria. Doesn't know the live LTP — uses the strike as a
+    placeholder so the user still sees what *would* have been picked."""
+    df = _load_instruments(token)
+    if df is None:
+        return None
+    try:
+        u = underlying.upper()
+        opt = option_type.upper()
+        cols = {c.lower(): c for c in df.columns}
+        sym_col = cols.get("trading_symbol") or cols.get("symbol")
+        underlying_col = cols.get("underlying_symbol") or cols.get("underlying")
+        type_col = cols.get("instrument_type") or cols.get("type")
+        expiry_col = cols.get("expiry_date") or cols.get("expiry")
+        strike_col = cols.get("strike_price") or cols.get("strike")
+        if not all([sym_col, underlying_col, type_col, expiry_col, strike_col]):
+            return None
+        sub = df[
+            df[underlying_col].astype(str).str.upper().eq(u)
+            & df[type_col].astype(str).str.upper().eq(opt)
+            & df[expiry_col].astype(str).str.startswith(expiry[:10])
+        ]
+        if sub.empty:
+            return None
+        rows: List[Dict[str, Any]] = []
+        for _, r in sub.iterrows():
+            try:
+                rows.append({
+                    "strike": float(r[strike_col]),
+                    "trading_symbol": str(r[sym_col]),
+                    "ltp": 0.0, "iv": 0.0, "gamma": 0.0,
+                })
+            except Exception:  # noqa: BLE001
+                continue
+        if not rows:
+            return None
+        rows.sort(key=lambda x: x["strike"])
+        # spot ≈ ATM, approximate by the centre of available strikes
+        spot = rows[len(rows) // 2]["strike"]
+        atm_idx = min(range(len(rows)), key=lambda i: abs(rows[i]["strike"] - spot))
+        step = 1 if opt == "CE" else -1
+        off = {"ATM": 0, "OTM1": step, "OTM2": 2 * step, "ITM1": -step, "HIGH_GAMMA": 0}.get(strategy, 0)
+        idx = max(0, min(len(rows) - 1, atm_idx + off))
+        return rows[idx]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("master fallback pick failed: %s", exc)
+        return None
+
+
 @api.post("/orders/place-preset")
 async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depends(require_token)):
     # Demo mode: stateful — actually mutate db.demo_state
@@ -1057,10 +1114,16 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     api_ = _groww_client(token)
 
     # 2. Get option chain & underlying LTP
+    chain_raw: Any = None
+    chain_error: Optional[str] = None
     try:
         chain_raw = await _call_blocking(api_.get_option_chain, payload.exchange, payload.underlying, payload.expiry)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Option chain fetch failed: {exc}") from exc
+        chain_error = str(exc)
+        logger.warning("Option chain fetch failed: %s", exc)
+        if not payload.dry_run:
+            # For real orders, we still need a live LTP — bubble up.
+            raise HTTPException(status_code=502, detail=f"Option chain fetch failed: {exc}") from exc
 
     # Pull spot from chain payload (Groww returns it as `underlying_value` etc.)
     spot = 0.0
@@ -1074,8 +1137,35 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                     pass
     rows = _normalize_chain(chain_raw)
     pick = _pick_strike(rows, spot, payload.option_type, preset_doc["strike_selection"], preset_doc["iv_filter"])
+    fallback_reason: Optional[str] = None
     if not pick:
-        raise HTTPException(status_code=404, detail="No strike matched the preset criteria")
+        # Best-effort fallback so the user always sees what *would* have
+        # been chosen, even when Groww's option chain is empty / unreachable.
+        pick = await _call_blocking(
+            _fallback_pick_from_master, token, payload.underlying, payload.expiry,
+            payload.option_type, preset_doc["strike_selection"],
+        )
+        if pick:
+            fallback_reason = (
+                "option_chain_unavailable" if chain_error else "no_strike_matched_filters"
+            )
+        else:
+            if payload.dry_run:
+                # Even the master scan came up empty — return what we know
+                # rather than 404'ing the preview.
+                return {
+                    "dry_run": True,
+                    "preset": preset_doc,
+                    "selected": None,
+                    "quantity": 0,
+                    "lots": 0,
+                    "lot_size": 0,
+                    "estimated_cost": 0,
+                    "spot": spot,
+                    "fallback_reason": "no_contracts_found",
+                    "error": chain_error,
+                }
+            raise HTTPException(status_code=404, detail="No strike matched the preset criteria")
 
     # 3. Compute quantity from capital * sizing
     sizing = float(preset_doc["position_sizing_pct"]) / 100.0
@@ -1123,6 +1213,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             "estimated_cost": round(quantity * float(pick.get("ltp") or 0), 2),
             "order": order_payload,
             "spot": spot,
+            "fallback_reason": fallback_reason,
         }
 
     try:

@@ -5,12 +5,14 @@ import BottomSheet from "./BottomSheet";
 
 export type OrderPreview = {
   preset?: any;
-  selected?: { trading_symbol?: string; strike?: number; ltp?: number; iv?: number; gamma?: number };
+  selected?: { trading_symbol?: string; strike?: number; ltp?: number; iv?: number; gamma?: number } | null;
   quantity?: number;
   lots?: number;
   lot_size?: number;
   estimated_cost?: number;
   spot?: number;
+  fallback_reason?: string | null;
+  error?: string | null;
   order?: { trading_symbol?: string; transaction_type?: string; order_type?: string; price?: number };
 };
 
@@ -74,6 +76,21 @@ export default function OrderConfirmSheet({
         </View>
       ) : (
         <>
+          {preview.fallback_reason || preview.error || !preview.selected ? (
+            <View style={styles.warnBox}>
+              <Text style={styles.warnText}>
+                {preview.fallback_reason === "option_chain_unavailable"
+                  ? "Option chain unreachable. Showing best-effort pick from the instrument master — LTP & quantity will be recomputed at the moment the order is placed."
+                  : preview.fallback_reason === "no_strike_matched_filters"
+                  ? "No strike matched the preset's IV/strategy filters exactly. Showing closest ATM strike — adjust the preset for stricter matching."
+                  : preview.fallback_reason === "no_contracts_found"
+                  ? "No live option contracts found for this underlying + expiry. Pick a different expiry."
+                  : preview.error
+                  ? `Preview error: ${preview.error}`
+                  : "Could not build a full preview — review carefully before placing."}
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.card}>
             <Row label="SYMBOL" value={sel.trading_symbol ?? "—"} bold />
             <Row label="STRIKE" value={sel.strike != null ? String(sel.strike) : "—"} />
@@ -139,6 +156,13 @@ const styles = StyleSheet.create({
   sub: { fontFamily: FONT, fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
   loadingBlock: { paddingVertical: 24, alignItems: "center", gap: 8 },
   loadingText: { fontFamily: FONT, color: Colors.textSecondary, fontSize: 13 },
+  warnBox: {
+    backgroundColor: "#FEF3C7",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 12,
+  },
+  warnText: { fontFamily: FONT, color: "#92400E", fontSize: 12, lineHeight: 17 },
   card: {
     backgroundColor: "#F8FAFC",
     borderRadius: 10,
