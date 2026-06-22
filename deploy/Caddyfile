@@ -1,8 +1,9 @@
-# Replace `scalpx.example.com` with the DNS name pointing at your droplet.
-# If you don't have a domain yet, use the droplet's public IP — Caddy will
-# serve plain HTTP. Add HTTPS later by switching the site label to a domain.
+# Site address sourced from $DOMAIN.
+# - For HTTPS via a real domain: set DOMAIN=your.domain.com in deploy/.env
+# - For plain HTTP on the droplet IP: set DOMAIN=:80 (default fallback)
+#   Caddy treats `:80` as "listen on port 80, all hostnames, plain HTTP".
 
-{$DOMAIN:scalpx.example.com} {
+{$DOMAIN::80} {
     encode zstd gzip
 
     # Backend (FastAPI under /api/*)

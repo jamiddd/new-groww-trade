@@ -4,9 +4,9 @@
 # environment and brings the stack up.
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/<your-gh-user>/<your-repo>.git}"
+REPO_URL="${REPO_URL:-https://github.com/jamiddd/new-groww-trade.git}"
 APP_DIR="${APP_DIR:-/opt/scalpx}"
-DOMAIN="${DOMAIN:-}"
+DOMAIN="${DOMAIN:-:80}"
 
 echo "==> Updating apt + installing Docker"
 apt-get update
