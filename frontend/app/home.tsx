@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
 
 import { api, disconnect, AppSettings } from "@/src/api/client";
 import { Colors, FONT } from "@/src/theme";
@@ -185,6 +186,14 @@ export default function Home() {
     }
   }, []);
 
+  // Hold a stable ref to the in-flight `placing` flag so the polling
+  // interval can skip refreshes during order placement without being torn
+  // down and recreated on every state change.
+  const placingRef = useRef(false);
+  useEffect(() => {
+    placingRef.current = placing;
+  }, [placing]);
+
   useFocusEffect(
     useCallback(() => {
       let mounted = true;
@@ -202,8 +211,18 @@ export default function Home() {
         await loadAll();
         if (mounted) setLoading(false);
       })();
+
+      // Auto-refresh positions + margin every 5 s while the screen is
+      // focused. This is what surfaces live LTP / live P&L without the
+      // user needing to pull-to-refresh.
+      const poll = setInterval(() => {
+        if (!mounted || placingRef.current) return;
+        loadAll();
+      }, 5000);
+
       return () => {
         mounted = false;
+        clearInterval(poll);
       };
     }, [loadAll]),
   );
@@ -459,6 +478,8 @@ export default function Home() {
             const pnl = Number(p.pnl ?? p.unrealised_pnl ?? 0) || 0;
             const qty = Number(p.net_quantity ?? p.quantity ?? 0);
             const ap = Number(p.average_price ?? p.avg_price ?? 0);
+            const ltp = Number(p.ltp ?? p.last_price ?? 0);
+            const changePct = ap > 0 && ltp > 0 ? ((ltp - ap) / ap) * 100 : 0;
             const sym = p.trading_symbol ?? p.symbol ?? "—";
             const side = qty >= 0 ? "BUY" : "SELL";
             return (
@@ -477,6 +498,21 @@ export default function Home() {
                   <Text style={styles.posMeta}>
                     Avg. Price - {formatMoney(ap)} × {Math.abs(qty)} Qty
                   </Text>
+                  {ltp > 0 ? (
+                    <View style={styles.posLtpRow}>
+                      <Text style={styles.posLtpLabel}>LTP </Text>
+                      <Text style={styles.posLtpValue}>{formatMoney(ltp)}</Text>
+                      {ap > 0 ? (
+                        <Text
+                          style={[styles.posLtpChange, { color: pnlColor(changePct) }]}
+                        >
+                          {"  "}
+                          {pnlSign(changePct)}
+                          {changePct.toFixed(2)}%
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
                   {p.created_at ? <Text style={styles.posTime}>{p.created_at}</Text> : null}
                 </View>
                 <Text style={[styles.posPnl, { color: pnlColor(pnl) }]}>
@@ -511,7 +547,11 @@ export default function Home() {
           </TouchableOpacity>
 
           {!actionsCollapsed ? (
-            <View testID="actions-body">
+            <Animated.View
+              testID="actions-body"
+              entering={FadeInDown.duration(220)}
+              exiting={FadeOutDown.duration(180)}
+            >
               <View style={styles.footerTop}>
                 <TouchableOpacity
                   style={styles.maxLossPill}
@@ -521,7 +561,7 @@ export default function Home() {
                   }}
                   testID="max-loss-pill"
                 >
-                  <Text style={styles.maxLossText}>Set Max Loss: (₹{formatINR(maxLoss)})</Text>
+                  <Text style={styles.maxLossText}>Set Max Loss: ({formatMoney(maxLoss)})</Text>
                 </TouchableOpacity>
                 <View style={styles.toggleWrap}>
                   <Text style={[styles.toggleLabel, optionType === "CE" && styles.toggleLabelActive]}>CE</Text>
@@ -579,7 +619,7 @@ export default function Home() {
               >
                 <Text style={styles.exitText}>EXIT ALL POSITIONS</Text>
               </TouchableOpacity>
-            </View>
+            </Animated.View>
           ) : null}
         </View>
       </SafeAreaView>
@@ -903,6 +943,10 @@ const styles = StyleSheet.create({
   posSym: { fontFamily: FONT, fontWeight: "bold", color: Colors.text, fontSize: 13 },
   posSide: { fontFamily: FONT, fontWeight: "bold", color: Colors.primary, fontSize: 13 },
   posMeta: { fontFamily: FONT, fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  posLtpRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
+  posLtpLabel: { fontFamily: FONT, fontSize: 11, color: Colors.textMuted, fontWeight: "bold", letterSpacing: 0.6 },
+  posLtpValue: { fontFamily: FONT, fontSize: 12, color: Colors.text, fontWeight: "bold" },
+  posLtpChange: { fontFamily: FONT, fontSize: 11, fontWeight: "bold" },
   posTime: { fontFamily: FONT, fontSize: 10, color: Colors.textMuted, marginTop: 2 },
   posPnl: { fontFamily: FONT, fontSize: 14, fontWeight: "bold" },
 

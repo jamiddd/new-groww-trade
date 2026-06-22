@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { LogBox } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 
@@ -32,10 +33,12 @@ export default function RootLayout() {
   if (!loaded && !error) return null;
 
   return (
-    <KeyboardProvider>
-      <SafeAreaProvider>
-        <Stack screenOptions={{ headerShown: false }} />
-      </SafeAreaProvider>
-    </KeyboardProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardProvider>
+        <SafeAreaProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </SafeAreaProvider>
+      </KeyboardProvider>
+    </GestureHandlerRootView>
   );
 }

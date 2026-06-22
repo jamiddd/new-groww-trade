@@ -156,9 +156,6 @@ export default function PresetScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity disabled testID="preset-delete">
-          <Text style={[styles.footerBtn, { color: Colors.textMuted }]}>Delete</Text>
-        </TouchableOpacity>
         <TouchableOpacity onPress={save} testID="preset-update">
           <Text style={[styles.footerBtn, { color: Colors.primary }]}>{saving ? "Saving…" : "Update"}</Text>
         </TouchableOpacity>
