@@ -10,8 +10,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY backend/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt gunicorn uvloop
+COPY deploy/requirements.prod.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY backend /app/backend
 
