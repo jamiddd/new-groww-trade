@@ -949,12 +949,43 @@ def _pick_strike(rows: List[Dict[str, Any]], spot: float, opt_type: str, strateg
     return filtered[idx]
 
 
+async def _fetch_spot_ltp(api_: GrowwAPI, underlying: str, exchange: str) -> float:
+    """Best-effort fetch of the underlying index/stock spot LTP.
+
+    For NSE indices the Groww convention is `exchange_trading_symbol = NSE_NIFTY`
+    and segment `CASH`. Returns 0.0 on any failure (caller falls back further).
+    """
+    candidates = [
+        (f"{exchange}_{underlying}", "CASH"),
+        (f"{exchange}_{underlying} 50", "CASH"),  # NSE_NIFTY 50
+    ]
+    for symbol, segment in candidates:
+        try:
+            data = await _call_blocking(api_.get_ltp, (symbol,), segment)
+            ltp = _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"]) or 0.0
+            if ltp > 0:
+                return float(ltp)
+        except Exception:  # noqa: BLE001
+            continue
+    return 0.0
+
+
+async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) -> float:
+    try:
+        data = await _call_blocking(api_.get_ltp, (f"{exchange}_{trading_symbol}",), "FNO")
+        ltp = _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"]) or 0.0
+        return float(ltp)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def _fallback_pick_from_master(
     token: str,
     underlying: str,
     expiry: str,
     option_type: str,
     strategy: str,
+    spot_hint: float = 0.0,
 ) -> Optional[Dict[str, Any]]:
     """Build a best-effort strike pick from the instrument-master CSV when
     Groww's option-chain endpoint fails or returns nothing matching the
@@ -994,8 +1025,9 @@ def _fallback_pick_from_master(
         if not rows:
             return None
         rows.sort(key=lambda x: x["strike"])
-        # spot ≈ ATM, approximate by the centre of available strikes
-        spot = rows[len(rows) // 2]["strike"]
+        # Use the hint (live spot LTP) if provided; otherwise fall back to
+        # the centre of available strikes (a poor man's ATM).
+        spot = float(spot_hint) if spot_hint and spot_hint > 0 else rows[len(rows) // 2]["strike"]
         atm_idx = min(range(len(rows)), key=lambda i: abs(rows[i]["strike"] - spot))
         step = 1 if opt == "CE" else -1
         off = {"ATM": 0, "OTM1": step, "OTM2": 2 * step, "ITM1": -step, "HIGH_GAMMA": 0}.get(strategy, 0)
@@ -1158,6 +1190,10 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                     break
                 except Exception:  # noqa: BLE001
                     pass
+    # If chain didn't give us a spot, fetch the index/stock LTP directly so
+    # the strike picker chooses an ATM near the *real* market price.
+    if spot <= 0:
+        spot = await _fetch_spot_ltp(api_, payload.underlying, payload.exchange)
     rows = _normalize_chain(chain_raw)
     pick = _pick_strike(rows, spot, payload.option_type, preset_doc["strike_selection"], preset_doc["iv_filter"])
     fallback_reason: Optional[str] = None
@@ -1166,7 +1202,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         # been chosen, even when Groww's option chain is empty / unreachable.
         pick = await _call_blocking(
             _fallback_pick_from_master, token, payload.underlying, payload.expiry,
-            payload.option_type, preset_doc["strike_selection"],
+            payload.option_type, preset_doc["strike_selection"], spot,
         )
         if pick:
             fallback_reason = (
@@ -1174,8 +1210,6 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             )
         else:
             if payload.dry_run:
-                # Even the master scan came up empty — return what we know
-                # rather than 404'ing the preview.
                 return {
                     "dry_run": True,
                     "preset": preset_doc,
@@ -1190,6 +1224,12 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 }
             raise HTTPException(status_code=404, detail="No strike matched the preset criteria")
 
+    # Master-fallback picks come without LTP — try the live quote endpoint.
+    if pick and float(pick.get("ltp") or 0) <= 0:
+        live_ltp = await _fetch_option_ltp(api_, payload.exchange, pick["trading_symbol"])
+        if live_ltp > 0:
+            pick["ltp"] = live_ltp
+
     # 3. Compute quantity from capital * sizing
     sizing = float(preset_doc["position_sizing_pct"]) / 100.0
     risk_capital = max(0.0, payload.capital) * sizing
@@ -1202,7 +1242,23 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 lot_size = int(row.iloc[0]["lot_size"]) or 1
         except Exception:  # noqa: BLE001
             pass
-    contract_cost = max(0.01, pick["ltp"]) * lot_size
+    contract_cost = float(pick.get("ltp") or 0) * lot_size
+    # If we don't have a live LTP (e.g. master fallback and live quote also
+    # failed), we can't size safely — never use a placeholder LTP.
+    if contract_cost <= 0:
+        if payload.dry_run:
+            return {
+                "dry_run": True,
+                "preset": preset_doc,
+                "selected": pick,
+                "quantity": 0,
+                "lots": 0,
+                "lot_size": lot_size,
+                "estimated_cost": 0,
+                "spot": spot,
+                "fallback_reason": fallback_reason or "ltp_unavailable",
+            }
+        raise HTTPException(status_code=400, detail="No live LTP available for the picked strike — refusing to size.")
     lots = math.floor(risk_capital / contract_cost) if contract_cost > 0 else 0
     quantity = lots * lot_size
 

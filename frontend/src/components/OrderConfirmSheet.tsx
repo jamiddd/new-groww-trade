@@ -87,6 +87,8 @@ export default function OrderConfirmSheet({
                   ? "No live option contracts found for this underlying + expiry. Pick a different expiry."
                   : preview.fallback_reason === "insufficient_capital"
                   ? "Capital × position-sizing % can't cover even one lot at the current LTP. Increase capital, sizing %, or pick a cheaper strike."
+                  : preview.fallback_reason === "ltp_unavailable"
+                  ? "Couldn't fetch a live LTP for the picked strike — sizing skipped. Try another expiry or wait for the market to refresh quotes."
                   : preview.error
                   ? `Preview error: ${preview.error}`
                   : "Could not build a full preview — review carefully before placing."}
