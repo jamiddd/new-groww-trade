@@ -1,0 +1,20 @@
+# Replace `scalpx.example.com` with the DNS name pointing at your droplet.
+# If you don't have a domain yet, use the droplet's public IP — Caddy will
+# serve plain HTTP. Add HTTPS later by switching the site label to a domain.
+
+{$DOMAIN:scalpx.example.com} {
+    encode zstd gzip
+
+    # Backend (FastAPI under /api/*)
+    handle /api/* {
+        reverse_proxy backend:8001
+    }
+
+    # Optional: serve a static web build of the Expo frontend.
+    # Drop `expo export --platform web` output into /srv and uncomment.
+    # handle {
+    #     root * /srv
+    #     try_files {path} /index.html
+    #     file_server
+    # }
+}
