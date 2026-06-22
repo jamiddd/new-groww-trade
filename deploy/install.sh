@@ -27,13 +27,13 @@ fi
 cd "$APP_DIR/deploy"
 
 if [ ! -f .env ]; then
-    echo "==> Creating .env from template"
-    cp .env.example .env
+    echo "==> Creating .env"
     PEPPER=$(openssl rand -base64 48 | tr -d '\n')
-    sed -i "s|__REPLACE_ME_WITH_A_RANDOM_BASE64_STRING__|$PEPPER|" .env
-    if [ -n "$DOMAIN" ]; then
-        sed -i "s|scalpx.yourdomain.com|$DOMAIN|" .env
-    fi
+    cat > .env <<EOF
+DOMAIN=${DOMAIN}
+DB_NAME=scalpx
+SCALPX_PEPPER=${PEPPER}
+EOF
     echo "  .env created. Edit deploy/.env if you need to change DOMAIN."
 fi
 
