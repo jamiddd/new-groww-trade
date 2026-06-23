@@ -57,7 +57,20 @@ export default function Login() {
   const [autoLogin, setAutoLogin] = useState(false);
 
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
-  const [serverIp, setServerIp] = useState<string | null>(null);
+  // Fall back to the host of EXPO_PUBLIC_BACKEND_URL so users see the
+  // droplet's IP immediately even when the live /api/auth/server-ip call
+  // is blocked (e.g. the web preview's HTTPS → droplet HTTP mixed-content
+  // restriction). The API response, when it lands, overrides this.
+  const defaultIp = (() => {
+    try {
+      const raw = process.env.EXPO_PUBLIC_BACKEND_URL ?? "";
+      const host = new URL(raw).hostname;
+      return /^\d+\.\d+\.\d+\.\d+$/.test(host) ? host : null;
+    } catch {
+      return null;
+    }
+  })();
+  const [serverIp, setServerIp] = useState<string | null>(defaultIp);
   const [ipCopied, setIpCopied] = useState(false);
 
   const [loading, setLoading] = useState(false);
