@@ -40,8 +40,10 @@ export default function PresetScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [pickerType, setPickerType] = useState<null | "strike" | "iv" | "order" | "size" | "sl" | "tp" | "limit">(null);
+  const [pickerType, setPickerType] = useState<null | "strike" | "iv" | "order" | "size" | "risk" | "limit">(null);
   const [tempNum, setTempNum] = useState("");
+  const [tempSl, setTempSl] = useState("");
+  const [tempTp, setTempTp] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -116,23 +118,14 @@ export default function PresetScreen() {
         />
         <Row
           title="RISK MANAGEMENT"
-          description="Set exit criteria for this trade."
+          description="Set exit criteria for this trade. 0% TP disables take-profit."
           value={`${preset.stop_loss_pct}% SL${preset.take_profit_pct ? `, ${preset.take_profit_pct}% TP` : ", No TP"}`}
           onPress={() => {
-            setTempNum(String(preset.stop_loss_pct));
-            setPickerType("sl");
+            setTempSl(String(preset.stop_loss_pct));
+            setTempTp(String(preset.take_profit_pct));
+            setPickerType("risk");
           }}
-          testID="row-sl"
-        />
-        <Row
-          title="TAKE PROFIT"
-          description="0% disables Take Profit."
-          value={`${preset.take_profit_pct}%`}
-          onPress={() => {
-            setTempNum(String(preset.take_profit_pct));
-            setPickerType("tp");
-          }}
-          testID="row-tp"
+          testID="row-risk"
         />
         <Row
           title="ORDER TYPE"
@@ -209,25 +202,15 @@ export default function PresetScreen() {
           setPickerType(null);
         }}
       />
-      <NumberPicker
-        visible={pickerType === "sl"}
-        title="Stop Loss %"
-        value={tempNum}
-        onChange={setTempNum}
+      <RiskPicker
+        visible={pickerType === "risk"}
+        sl={tempSl}
+        tp={tempTp}
+        onChangeSl={setTempSl}
+        onChangeTp={setTempTp}
         onClose={() => setPickerType(null)}
-        onSave={(v) => {
-          update({ stop_loss_pct: v });
-          setPickerType(null);
-        }}
-      />
-      <NumberPicker
-        visible={pickerType === "tp"}
-        title="Take Profit %"
-        value={tempNum}
-        onChange={setTempNum}
-        onClose={() => setPickerType(null)}
-        onSave={(v) => {
-          update({ take_profit_pct: v });
+        onSave={(slV, tpV) => {
+          update({ stop_loss_pct: slV, take_profit_pct: tpV });
           setPickerType(null);
         }}
       />
@@ -350,6 +333,66 @@ function NumberPicker({
   );
 }
 
+/**
+ * Combined SL + TP editor — saves both percentages in one round-trip so
+ * the user doesn't have to open two separate sheets to define a complete
+ * risk-management profile.
+ */
+function RiskPicker({
+  visible,
+  sl,
+  tp,
+  onChangeSl,
+  onChangeTp,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  sl: string;
+  tp: string;
+  onChangeSl: (v: string) => void;
+  onChangeTp: (v: string) => void;
+  onClose: () => void;
+  onSave: (sl: number, tp: number) => void;
+}) {
+  return (
+    <BottomSheet visible={visible} onClose={onClose} avoidKeyboard testID="risk-picker">
+      <Text style={styles.sheetTitle}>Risk Management</Text>
+      <Text style={styles.sheetHelp}>
+        Stop-loss exits the trade if the option drops by this %. Take-profit
+        exits if it rises. Set TP to 0 to disable take-profit.
+      </Text>
+
+      <Text style={styles.fieldLabel}>STOP LOSS %</Text>
+      <TextInput
+        style={styles.input}
+        value={sl}
+        onChangeText={onChangeSl}
+        keyboardType="decimal-pad"
+        autoFocus
+        testID="risk-picker-sl-input"
+      />
+
+      <Text style={[styles.fieldLabel, { marginTop: 14 }]}>TAKE PROFIT %</Text>
+      <TextInput
+        style={styles.input}
+        value={tp}
+        onChangeText={onChangeTp}
+        keyboardType="decimal-pad"
+        testID="risk-picker-tp-input"
+      />
+
+      <TouchableOpacity
+        style={styles.saveBtn}
+        onPress={() => onSave(Number(sl) || 0, Number(tp) || 0)}
+        testID="risk-picker-save"
+      >
+        <Text style={styles.saveText}>SAVE</Text>
+      </TouchableOpacity>
+    </BottomSheet>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
   header: {
@@ -393,6 +436,22 @@ const styles = StyleSheet.create({
   },
   grabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: "center", marginBottom: 16 },
   sheetTitle: { fontFamily: FONT, fontWeight: "bold", color: Colors.text, fontSize: 15 },
+  sheetHelp: {
+    fontFamily: FONT,
+    color: Colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  fieldLabel: {
+    fontFamily: FONT,
+    color: Colors.textSecondary,
+    fontSize: 10,
+    fontWeight: "bold",
+    letterSpacing: 1,
+    marginTop: 6,
+  },
   optRow: {
     flexDirection: "row",
     paddingVertical: 14,
