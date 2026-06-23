@@ -291,16 +291,104 @@ async def _save_demo_state(token: str, doc: Dict[str, Any]) -> None:
 
 async def _demo_refresh_state(token: str) -> Dict[str, Any]:
     """Re-run the LTP/PnL random walk at most twice per second so margin +
-    positions stay consistent within the same client fetch cycle."""
+    positions stay consistent within the same client fetch cycle. After
+    each walk we also evaluate any active SL/TP smart-orders and auto-
+    close positions whose LTP has crossed the trigger — this is what
+    actually makes the bracket protection visible in demo mode."""
     doc = await _demo_state_for(token)
     now = time.time()
     last = doc.get("last_walk_ts", 0)
     if (now - last) >= 0.5:
         for p in doc["positions"]:
             _recompute_position_pnl(p)
+        _check_demo_smart_order_triggers(doc)
         doc["last_walk_ts"] = now
         await _save_demo_state(token, doc)
     return doc
+
+
+def _check_demo_smart_order_triggers(doc: Dict[str, Any]) -> None:
+    """Walk active demo smart orders and, for each one whose underlying
+    position has crossed its SL or TP trigger, close the position with a
+    SELL order tagged with the trigger reason. Mutates `doc` in place.
+
+    Trigger semantics (we currently only auto-buy long, so):
+      • SL_HIT  → last_price <= sl_price  (the option dropped → bail)
+      • TP_HIT  → last_price >= tp_price  (the option ran up → take profit)
+    """
+    smart_orders = doc.get("smart_orders", [])
+    if not smart_orders:
+        return
+    by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    for so in smart_orders:
+        if so.get("status") != "ACTIVE":
+            continue
+        sym = so.get("trading_symbol")
+        if sym:
+            by_symbol.setdefault(sym, []).append(so)
+    if not by_symbol:
+        return
+
+    for p in doc["positions"]:
+        sym = p.get("trading_symbol")
+        net_qty = int(p.get("net_quantity") or 0)
+        if not sym or net_qty <= 0:
+            continue
+        active = by_symbol.get(sym, [])
+        if not active:
+            continue
+        last = float(p.get("last_price") or 0)
+        if last <= 0:
+            continue
+
+        triggered_reason: Optional[str] = None
+        triggered_price: float = 0.0
+        for so in active:
+            tp = float(so.get("tp_price") or 0)
+            sl = float(so.get("sl_price") or 0)
+            if tp > 0 and last >= tp:
+                triggered_reason = "TP_HIT"
+                triggered_price = tp
+                break
+            if sl > 0 and last <= sl:
+                triggered_reason = "SL_HIT"
+                triggered_price = sl
+                break
+        if not triggered_reason:
+            continue
+
+        # Close the long: book a SELL for the full quantity, refresh PnL
+        # using the trigger price (rather than the random-walk LTP) so the
+        # numbers match what the user saw on the trigger row.
+        avg = float(p.get("average_price") or 0)
+        realised_pnl = round((triggered_price - avg) * net_qty, 2)
+        p["last_price"] = triggered_price
+        p["pnl"] = realised_pnl
+        p["net_quantity"] = 0  # marks for sweep below
+
+        doc.setdefault("orders", []).append({
+            "order_id": f"demo-{uuid.uuid4().hex[:8]}",
+            "trading_symbol": sym,
+            "transaction_type": "SELL",
+            "order_status": "EXECUTED",
+            "quantity": net_qty,
+            "filled_quantity": net_qty,
+            "average_price": triggered_price,
+            "order_type": "MARKET",
+            "exchange_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "trigger_reason": triggered_reason,
+            "realised_pnl": realised_pnl,
+        })
+
+        # Mark every active smart order on this symbol as triggered
+        # (whether SL or TP — since OCO cancels the other leg anyway).
+        for so in active:
+            so["status"] = "TRIGGERED"
+            so["triggered_reason"] = triggered_reason
+            so["triggered_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Sweep positions that just got fully closed by triggers.
+    doc["positions"] = [p for p in doc["positions"] if int(p.get("net_quantity") or 0) != 0]
 
 
 async def _demo_positions(token: str) -> Dict[str, Any]:
@@ -1505,7 +1593,10 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     if spot <= 0:
         spot = await _fetch_spot_ltp(api_, payload.underlying, payload.exchange)
     rows = _normalize_chain(chain_raw)
-    pick = _pick_strike(rows, spot, payload.option_type, preset_doc["strike_selection"], preset_doc["iv_filter"])
+    # IV filter is currently disabled (UI shows it greyed out). We always
+    # pass "ANY" so the strike picker doesn't filter by IV, regardless of
+    # what's stored on the preset.
+    pick = _pick_strike(rows, spot, payload.option_type, preset_doc["strike_selection"], "ANY")
     fallback_reason: Optional[str] = None
     if not pick:
         # Best-effort fallback so the user always sees what *would* have

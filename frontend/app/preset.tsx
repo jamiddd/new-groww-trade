@@ -101,9 +101,10 @@ export default function PresetScreen() {
         />
         <Row
           title="IMPLIED VOLATILITY"
-          description="Set IV low or high when buying"
-          value={IV_LABELS[preset.iv_filter] ?? preset.iv_filter}
-          onPress={() => setPickerType("iv")}
+          description="Coming soon — IV-based filtering is currently disabled."
+          value={`${IV_LABELS[preset.iv_filter] ?? preset.iv_filter} · disabled`}
+          onPress={() => {}}
+          disabled
           testID="row-iv"
         />
         <Row
@@ -241,15 +242,23 @@ function Row({
   value,
   onPress,
   testID,
+  disabled,
 }: {
   title: string;
   description: string;
   value: string;
   onPress: () => void;
   testID?: string;
+  disabled?: boolean;
 }) {
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} testID={testID}>
+    <TouchableOpacity
+      style={[styles.row, disabled && { opacity: 0.45 }]}
+      onPress={disabled ? undefined : onPress}
+      activeOpacity={disabled ? 1 : 0.6}
+      disabled={disabled}
+      testID={testID}
+    >
       <View style={{ flex: 1, paddingRight: 16 }}>
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.rowDesc}>{description}</Text>

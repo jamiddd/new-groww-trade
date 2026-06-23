@@ -29,6 +29,8 @@ type OrderRow = {
   created_at?: string;
   exchange_time?: string;
   exchange?: string;
+  trigger_reason?: string | null;
+  realised_pnl?: number | null;
 };
 
 const STATUS_PILLS: Record<string, { bg: string; fg: string }> = {
@@ -98,6 +100,12 @@ export default function History() {
             const side = item.transaction_type || "—";
             const qty = item.filled_quantity ?? item.quantity ?? 0;
             const px = item.average_price ?? item.price ?? 0;
+            const reason = item.trigger_reason; // "TP_HIT" | "SL_HIT" | undefined
+            const reasonLabel =
+              reason === "TP_HIT" ? "🎯 TAKE PROFIT" : reason === "SL_HIT" ? "🛑 STOP LOSS" : null;
+            const reasonColor =
+              reason === "TP_HIT" ? Colors.pnlPositive : reason === "SL_HIT" ? Colors.pnlNegative : Colors.textSecondary;
+            const realised = typeof item.realised_pnl === "number" ? item.realised_pnl : null;
             return (
               <View style={styles.row} testID={`order-row-${index}`}>
                 <View style={{ flex: 1 }}>
@@ -108,6 +116,14 @@ export default function History() {
                   <Text style={styles.meta}>
                     {item.order_type || "—"} · Qty {qty} · ₹{Number(px).toFixed(2)}
                   </Text>
+                  {reasonLabel ? (
+                    <Text style={[styles.triggerLine, { color: reasonColor }]}>
+                      {reasonLabel}
+                      {realised !== null
+                        ? `   ${realised >= 0 ? "+" : ""}₹${Math.abs(realised).toFixed(2)} realised`
+                        : ""}
+                    </Text>
+                  ) : null}
                   {item.exchange_time || item.created_at ? (
                     <Text style={styles.time}>{item.exchange_time || item.created_at}</Text>
                   ) : null}
@@ -150,6 +166,7 @@ const styles = StyleSheet.create({
   sym: { fontFamily: FONT, fontWeight: "bold", color: Colors.text, fontSize: 13 },
   side: { fontFamily: FONT, fontWeight: "bold", fontSize: 11, color: Colors.primary, letterSpacing: 0.6 },
   meta: { fontFamily: FONT, fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  triggerLine: { fontFamily: FONT, fontSize: 11, fontWeight: "bold", letterSpacing: 0.4, marginTop: 3 },
   time: { fontFamily: FONT, fontSize: 10, color: Colors.textMuted, marginTop: 2 },
   pill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
   pillText: { fontFamily: FONT, fontSize: 10, fontWeight: "bold", letterSpacing: 0.6 },
