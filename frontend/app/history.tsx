@@ -16,6 +16,7 @@ import { Colors, FONT } from "@/src/theme";
 
 type OrderRow = {
   order_id?: string;
+  groww_order_id?: string;
   trading_symbol?: string;
   symbol?: string;
   transaction_type?: string;
@@ -23,12 +24,19 @@ type OrderRow = {
   status?: string;
   quantity?: number;
   filled_quantity?: number;
-  average_price?: number;
+  /** Limit price the user submitted (0 for MARKET) */
   price?: number;
+  /** Actual executed price — Groww's canonical key for fills */
+  average_fill_price?: number;
+  /** Older / alt naming */
+  average_price?: number;
+  trigger_price?: number;
   order_type?: string;
   created_at?: string;
   exchange_time?: string;
+  trade_date?: string;
   exchange?: string;
+  segment?: string;
   trigger_reason?: string | null;
   realised_pnl?: number | null;
 };
@@ -92,20 +100,26 @@ export default function History() {
         <FlatList
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           data={orders}
-          keyExtractor={(item, i) => item.order_id || `${item.trading_symbol}-${i}`}
+          keyExtractor={(item, i) => item.groww_order_id || item.order_id || `${item.trading_symbol}-${i}`}
           renderItem={({ item, index }) => {
             const status = (item.order_status || item.status || "").toUpperCase();
             const pill = STATUS_PILLS[status] || { bg: "rgba(0,0,0,0.05)", fg: Colors.textSecondary };
             const sym = item.trading_symbol || item.symbol || "—";
             const side = item.transaction_type || "—";
             const qty = item.filled_quantity ?? item.quantity ?? 0;
-            const px = item.average_price ?? item.price ?? 0;
+            // Groww's canonical executed-fill price field is `average_fill_price`.
+            // Fall back through legacy / alternate names so this also works for
+            // orders coming from older payloads or our own demo state.
+            const filled = Number(item.average_fill_price ?? item.average_price ?? 0);
+            const submitted = Number(item.price ?? 0);
+            const px = filled > 0 ? filled : submitted;
             const reason = item.trigger_reason; // "TP_HIT" | "SL_HIT" | undefined
             const reasonLabel =
               reason === "TP_HIT" ? "🎯 TAKE PROFIT" : reason === "SL_HIT" ? "🛑 STOP LOSS" : null;
             const reasonColor =
               reason === "TP_HIT" ? Colors.pnlPositive : reason === "SL_HIT" ? Colors.pnlNegative : Colors.textSecondary;
             const realised = typeof item.realised_pnl === "number" ? item.realised_pnl : null;
+            const ts = item.exchange_time || item.created_at || item.trade_date;
             return (
               <View style={styles.row} testID={`order-row-${index}`}>
                 <View style={{ flex: 1 }}>
@@ -114,7 +128,7 @@ export default function History() {
                     <Text style={[styles.side, side === "SELL" && { color: Colors.danger }]}>{side}</Text>
                   </View>
                   <Text style={styles.meta}>
-                    {item.order_type || "—"} · Qty {qty} · ₹{Number(px).toFixed(2)}
+                    {item.order_type || "—"} · Qty {qty} · ₹{px.toFixed(2)}
                   </Text>
                   {reasonLabel ? (
                     <Text style={[styles.triggerLine, { color: reasonColor }]}>
@@ -124,9 +138,7 @@ export default function History() {
                         : ""}
                     </Text>
                   ) : null}
-                  {item.exchange_time || item.created_at ? (
-                    <Text style={styles.time}>{item.exchange_time || item.created_at}</Text>
-                  ) : null}
+                  {ts ? <Text style={styles.time}>{ts}</Text> : null}
                 </View>
                 <View style={[styles.pill, { backgroundColor: pill.bg }]}>
                   <Text style={[styles.pillText, { color: pill.fg }]}>{status || "—"}</Text>

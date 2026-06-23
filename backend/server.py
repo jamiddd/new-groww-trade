@@ -768,7 +768,15 @@ def _merge_position_lists(*sources: Any) -> Dict[str, Any]:
     for s in sources:
         items: List[Dict[str, Any]] = []
         if isinstance(s, dict):
-            items = s.get("positions") or s.get("data") or []
+            items = (
+                s.get("positions")
+                or s.get("position_list")
+                or s.get("data")
+                or s.get("items")
+                or []
+            )
+            if isinstance(items, dict):
+                items = items.get("positions") or items.get("position_list") or []
         elif isinstance(s, list):
             items = s
         for item in items:
@@ -862,36 +870,19 @@ async def orders_history(page: int = 0, page_size: int = 50, token: str = Depend
     # Try every relevant source. Groww's /order/list returns the user's
     # full order book when called WITHOUT a segment param — but some
     # accounts only get the active page filtered by segment. So we
-    # combine: ALL + FNO + CASH and dedupe by order_id below.
-    # FNO + CASH covers options, futures, and equity orders — i.e. everything
-    # the user can place via Groww's own app.
+    # combine: ALL + FNO + CASH and dedupe by groww_order_id below.
     no_segment = await _safe(None)
     fno = await _safe(GrowwAPI.SEGMENT_FNO)
     cash = await _safe(GrowwAPI.SEGMENT_CASH)
 
-    # Diagnostic so we can debug "empty list" reports without the user
-    # having to do anything special.
-    for tag, payload in (("ALL", no_segment), ("FNO", fno), ("CASH", cash)):
-        if isinstance(payload, dict):
-            logger.info(
-                "order_list[%s] keys=%s sample_keys=%s",
-                tag,
-                list(payload.keys()),
-                list((payload.get("orders") or payload.get("order_list") or payload.get("data") or [{}])[:1] and
-                     (payload.get("orders") or payload.get("order_list") or payload.get("data") or [{}])[0].keys()) if (payload.get("orders") or payload.get("order_list") or payload.get("data")) else None,
-            )
-        elif isinstance(payload, list):
-            logger.info("order_list[%s] list len=%d", tag, len(payload))
-        else:
-            logger.info("order_list[%s] raw=%r", tag, payload)
-
     merged = _merge_order_lists(no_segment, fno, cash)
-    # Dedupe by order_id — when both a no-segment and per-segment fetch
-    # return the same order, keep the first occurrence.
+    # Dedupe — when both a no-segment and per-segment fetch return the
+    # same order, keep the first occurrence. Groww's canonical id is
+    # `groww_order_id`; older payloads / our demo layer use `order_id`.
     seen: set = set()
     unique: List[Dict[str, Any]] = []
     for o in merged.get("orders", []):
-        oid = o.get("order_id") or o.get("id") or o.get("groww_order_id")
+        oid = o.get("groww_order_id") or o.get("order_id") or o.get("id")
         if oid and oid in seen:
             continue
         if oid:
@@ -1461,6 +1452,7 @@ async def _list_active_smart_orders(api_: GrowwAPI) -> List[Dict[str, Any]]:
     if isinstance(listing, dict):
         items = (
             listing.get("smart_orders")
+            or listing.get("smart_order_list")
             or listing.get("data")
             or listing.get("items")
             or []
