@@ -123,6 +123,20 @@ export const api = {
   margin: () => req<any>("/account/margin"),
   positions: () => req<any>("/account/positions"),
   orders: () => req<any>("/account/orders"),
+  smartOrders: () =>
+    req<{
+      items: {
+        smart_order_id: string;
+        trading_symbol: string;
+        smart_order_type: string;
+        status: string;
+        tp_price?: number | string | null;
+        sl_price?: number | string | null;
+        trigger_price?: number | string | null;
+        trigger_direction?: string | null;
+        quantity?: number;
+      }[];
+    }>("/orders/smart-orders"),
   underlyings: (q: string = "") => req<{ items: { symbol: string; name: string; type: string }[] }>(`/instruments/underlyings?q=${encodeURIComponent(q)}`),
   expiries: (underlying: string, exchange: string = "NSE") =>
     req<any>(`/instruments/expiries?underlying=${encodeURIComponent(underlying)}&exchange=${exchange}`),

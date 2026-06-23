@@ -72,6 +72,12 @@ export default function Home() {
   const [capital, setCapital] = useState(0);
   const [balance, setBalance] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [smartOrdersBySymbol, setSmartOrdersBySymbol] = useState<Record<string, {
+    smart_order_id: string;
+    smart_order_type: string;
+    tp_price?: number | string | null;
+    sl_price?: number | string | null;
+  }>>({});
 
   const [optionType, setOptionType] = useState<"CE" | "PE">("CE");
 
@@ -158,7 +164,11 @@ export default function Home() {
   const loadAll = useCallback(async () => {
     setError(null);
     try {
-      const [m, p] = await Promise.all([api.margin(), api.positions()]);
+      const [m, p, so] = await Promise.all([
+        api.margin(),
+        api.positions(),
+        api.smartOrders().catch(() => ({ items: [] })),
+      ]);
       // Try to be flexible about Groww's payload shape
       const eq =
         m?.equity?.available_cash ??
@@ -181,6 +191,26 @@ export default function Home() {
       const positionsList: Position[] =
         p?.positions || p?.data || p?.items || (Array.isArray(p) ? p : []);
       setPositions(positionsList.filter((x) => (x.net_quantity || x.quantity || 0) !== 0));
+
+      // Index active smart orders by trading_symbol so each position row
+      // can light up its 🛡 protection badge in O(1).
+      const indexed: Record<string, {
+        smart_order_id: string;
+        smart_order_type: string;
+        tp_price?: number | string | null;
+        sl_price?: number | string | null;
+      }> = {};
+      for (const item of (so as any)?.items ?? []) {
+        if (item?.trading_symbol) {
+          indexed[item.trading_symbol] = {
+            smart_order_id: item.smart_order_id,
+            smart_order_type: item.smart_order_type,
+            tp_price: item.tp_price ?? null,
+            sl_price: item.sl_price ?? null,
+          };
+        }
+      }
+      setSmartOrdersBySymbol(indexed);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load account data");
     }
@@ -482,6 +512,7 @@ export default function Home() {
             const changePct = ap > 0 && ltp > 0 ? ((ltp - ap) / ap) * 100 : 0;
             const sym = p.trading_symbol ?? p.symbol ?? "—";
             const side = qty >= 0 ? "BUY" : "SELL";
+            const protection = sym ? smartOrdersBySymbol[sym] : undefined;
             return (
               <TouchableOpacity
                 key={`${sym}-${i}`}
@@ -494,6 +525,12 @@ export default function Home() {
                   <View style={styles.posRowTop}>
                     <Text style={styles.posSym}>{sym}</Text>
                     <Text style={styles.posSide}> · {side}</Text>
+                    {protection ? (
+                      <View style={styles.protectBadge} testID={`protection-badge-${i}`}>
+                        <Feather name="shield" size={9} color="#FFF" />
+                        <Text style={styles.protectBadgeText}>{protection.smart_order_type}</Text>
+                      </View>
+                    ) : null}
                   </View>
                   <Text style={styles.posMeta}>
                     Avg. Price - {formatMoney(ap)} × {Math.abs(qty)} Qty
@@ -512,6 +549,24 @@ export default function Home() {
                         </Text>
                       ) : null}
                     </View>
+                  ) : null}
+                  {protection &&
+                  ((protection.tp_price && Number(protection.tp_price) > 0) ||
+                    (protection.sl_price && Number(protection.sl_price) > 0)) ? (
+                    <Text style={styles.posProtectMeta}>
+                      {protection.tp_price && Number(protection.tp_price) > 0
+                        ? `TP ${formatMoney(Number(protection.tp_price))}`
+                        : ""}
+                      {protection.tp_price &&
+                      Number(protection.tp_price) > 0 &&
+                      protection.sl_price &&
+                      Number(protection.sl_price) > 0
+                        ? "  ·  "
+                        : ""}
+                      {protection.sl_price && Number(protection.sl_price) > 0
+                        ? `SL ${formatMoney(Number(protection.sl_price))}`
+                        : ""}
+                    </Text>
                   ) : null}
                   {p.created_at ? <Text style={styles.posTime}>{p.created_at}</Text> : null}
                 </View>
@@ -947,6 +1002,31 @@ const styles = StyleSheet.create({
   posLtpLabel: { fontFamily: FONT, fontSize: 11, color: Colors.textMuted, fontWeight: "bold", letterSpacing: 0.6 },
   posLtpValue: { fontFamily: FONT, fontSize: 12, color: Colors.text, fontWeight: "bold" },
   posLtpChange: { fontFamily: FONT, fontSize: 11, fontWeight: "bold" },
+  posProtectMeta: {
+    fontFamily: FONT,
+    fontSize: 10.5,
+    color: Colors.textMuted,
+    marginTop: 2,
+    fontWeight: "bold",
+    letterSpacing: 0.4,
+  },
+  protectBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  protectBadgeText: {
+    fontFamily: FONT,
+    fontSize: 9,
+    color: "#FFFFFF",
+    fontWeight: "bold",
+    letterSpacing: 0.6,
+  },
   posTime: { fontFamily: FONT, fontSize: 10, color: Colors.textMuted, marginTop: 2 },
   posPnl: { fontFamily: FONT, fontSize: 14, fontWeight: "bold" },
 

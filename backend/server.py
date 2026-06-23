@@ -248,8 +248,11 @@ async def _demo_state_for(token: str) -> Dict[str, Any]:
             "_id": user_key,
             "positions": [dict(p) for p in _DEMO_SEED_POSITIONS],
             "orders": [],
+            "smart_orders": [],
         }
         await db.demo_state.insert_one(doc)
+    # Backwards-compat: older demo docs may not have this key yet.
+    doc.setdefault("smart_orders", [])
     return doc
 
 
@@ -279,6 +282,7 @@ async def _save_demo_state(token: str, doc: Dict[str, Any]) -> None:
         {"$set": {
             "positions": doc["positions"],
             "orders": doc.get("orders", []),
+            "smart_orders": doc.get("smart_orders", []),
             "last_walk_ts": doc.get("last_walk_ts", 0),
         }},
         upsert=True,
@@ -1166,6 +1170,62 @@ async def _arm_protective_order(
         }
 
 
+async def _list_active_smart_orders(api_: GrowwAPI) -> List[Dict[str, Any]]:
+    """Fetch all currently-ACTIVE smart orders from Groww. Returns [] on any
+    failure so callers can degrade gracefully."""
+    try:
+        listing = await _call_blocking(
+            api_.get_smart_order_list, status=GrowwAPI.SMART_ORDER_STATUS_ACTIVE,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("get_smart_order_list failed: %s", exc)
+        return []
+    items: List[Dict[str, Any]] = []
+    if isinstance(listing, dict):
+        items = (
+            listing.get("smart_orders")
+            or listing.get("data")
+            or listing.get("items")
+            or []
+        )
+    elif isinstance(listing, list):
+        items = listing
+    return items
+
+
+async def _cancel_smart_orders_for_symbols(
+    api_: GrowwAPI, symbols: List[str]
+) -> List[Dict[str, Any]]:
+    """Cancel any ACTIVE smart orders that target the given trading symbols.
+    Best-effort — failures are logged and skipped so a single bad ID can't
+    block the user's exit flow."""
+    if not symbols:
+        return []
+    targeted = {s for s in symbols if s}
+    items = await _list_active_smart_orders(api_)
+    cancelled: List[Dict[str, Any]] = []
+    for so in items:
+        sym = so.get("trading_symbol") or so.get("symbol")
+        if sym not in targeted:
+            continue
+        sid = so.get("smart_order_id") or so.get("id")
+        sotype = so.get("smart_order_type") or so.get("type") or GrowwAPI.SMART_ORDER_TYPE_OCO
+        seg = so.get("segment") or GrowwAPI.SEGMENT_FNO
+        if not sid:
+            continue
+        try:
+            await _call_blocking(
+                api_.cancel_smart_order,
+                segment=seg,
+                smart_order_type=sotype,
+                smart_order_id=sid,
+            )
+            cancelled.append({"smart_order_id": sid, "trading_symbol": sym, "type": sotype})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cancel_smart_order %s (%s) failed: %s", sid, sym, exc)
+    return cancelled
+
+
 
 def _fallback_pick_from_master(
     token: str,
@@ -1353,6 +1413,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             float(preset_doc.get("take_profit_pct") or 0),
         )
         demo_protective: Optional[Dict[str, Any]] = None
+        smart_id = f"demo-so-{uuid.uuid4().hex[:8]}"
         if demo_protect_levels["sl"] > 0 and demo_protect_levels["tp"] > 0:
             demo_protective = {
                 "type": "OCO",
@@ -1361,7 +1422,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 "tp_price": demo_protect_levels["tp"],
                 "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
                 "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
-                "response": {"smart_order_id": f"demo-oco-{uuid.uuid4().hex[:6]}", "status": "ACTIVE"},
+                "response": {"smart_order_id": smart_id, "status": "ACTIVE"},
             }
         elif demo_protect_levels["sl"] > 0:
             demo_protective = {
@@ -1369,7 +1430,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 "entry_price": ltp,
                 "sl_price": demo_protect_levels["sl"],
                 "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
-                "response": {"smart_order_id": f"demo-gtt-{uuid.uuid4().hex[:6]}", "status": "ACTIVE"},
+                "response": {"smart_order_id": smart_id, "status": "ACTIVE"},
             }
         elif demo_protect_levels["tp"] > 0:
             demo_protective = {
@@ -1377,8 +1438,23 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 "entry_price": ltp,
                 "tp_price": demo_protect_levels["tp"],
                 "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
-                "response": {"smart_order_id": f"demo-gtt-{uuid.uuid4().hex[:6]}", "status": "ACTIVE"},
+                "response": {"smart_order_id": smart_id, "status": "ACTIVE"},
             }
+        if demo_protective:
+            # Persist so the home screen can render the 🛡 badge and the
+            # exit endpoint can clean it up when the position is manually
+            # closed.
+            doc.setdefault("smart_orders", []).append({
+                "smart_order_id": smart_id,
+                "trading_symbol": unique_symbol,
+                "smart_order_type": demo_protective["type"].split("_", 1)[0],  # OCO or GTT
+                "status": "ACTIVE",
+                "tp_price": demo_protective.get("tp_price"),
+                "sl_price": demo_protective.get("sl_price"),
+                "tp_pct": demo_protective.get("tp_pct"),
+                "sl_pct": demo_protective.get("sl_pct"),
+            })
+            await _save_demo_state(token, doc)
         return {
             "preset": preset_doc,
             "selected": {"trading_symbol": unique_symbol, "strike": strike, "ltp": ltp},
@@ -1640,6 +1716,7 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
     if _is_demo(token):
         doc = await _demo_state_for(token)
         results: List[Dict[str, Any]] = []
+        cancelled_smart: List[Dict[str, Any]] = []
         # Decide which positions are eligible.
         for p in doc["positions"]:
             net_qty = int(p.get("net_quantity") or 0)
@@ -1674,10 +1751,30 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
                 "order_type": "MARKET",
                 "exchange_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             })
+        # Cancel any smart orders for symbols we just touched, so the
+        # demo-state stays internally consistent (no orphan OCO/GTT after
+        # the position is gone).
+        touched = {r["trading_symbol"] for r in results if r.get("trading_symbol")}
+        if touched:
+            kept: List[Dict[str, Any]] = []
+            for so in doc.get("smart_orders", []):
+                if so.get("trading_symbol") in touched and so.get("status") == "ACTIVE":
+                    cancelled_smart.append({
+                        "smart_order_id": so.get("smart_order_id"),
+                        "trading_symbol": so.get("trading_symbol"),
+                        "type": so.get("smart_order_type"),
+                    })
+                else:
+                    kept.append(so)
+            doc["smart_orders"] = kept
         # Drop closed rows
         doc["positions"] = [p for p in doc["positions"] if int(p.get("net_quantity") or 0) != 0]
         await _save_demo_state(token, doc)
-        return {"closed": results, "count": len(results)}
+        return {
+            "closed": results,
+            "count": len(results),
+            "cancelled_smart_orders": cancelled_smart,
+        }
 
     api_ = _groww_client(token)
     try:
@@ -1691,7 +1788,12 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
     elif isinstance(pos_resp, list):
         positions_list = pos_resp
 
-    results = []
+    # First pass: figure out which positions match the filters, so we can
+    # cancel their smart orders BEFORE we send the SELL — otherwise the
+    # OCO/GTT could fire on the same symbol while we're closing it and
+    # cause duplicate fills (or rejections from Groww for "insufficient
+    # holding" once the position is flat).
+    eligible: List[Dict[str, Any]] = []
     for p in positions_list:
         net_qty = int(p.get("net_quantity") or p.get("quantity") or 0)
         if net_qty == 0:
@@ -1707,6 +1809,16 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
                 continue
             if payload.pnl_filter == "negative" and pnl >= 0:
                 continue
+        eligible.append(p)
+
+    cancelled_smart = await _cancel_smart_orders_for_symbols(
+        api_, [p.get("trading_symbol") or p.get("symbol") for p in eligible]
+    )
+
+    results = []
+    for p in eligible:
+        net_qty = int(p.get("net_quantity") or p.get("quantity") or 0)
+        trading_symbol = p.get("trading_symbol") or p.get("symbol")
         exchange = p.get("exchange") or "NSE"
         side_qty = abs(net_qty)
         qty_to_close = max(1, math.floor(side_qty * payload.percent / 100))
@@ -1729,7 +1841,40 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
         except Exception as exc:  # noqa: BLE001
             results.append({"trading_symbol": trading_symbol, "error": str(exc)})
 
-    return {"closed": results, "count": len(results)}
+    return {
+        "closed": results,
+        "count": len(results),
+        "cancelled_smart_orders": cancelled_smart,
+    }
+
+
+@api.get("/orders/smart-orders")
+async def list_smart_orders(token: str = Depends(require_token)):
+    """Return all currently-ACTIVE smart orders so the frontend can render
+    a 🛡 protection badge on the matching position rows."""
+    if _is_demo(token):
+        doc = await _demo_state_for(token)
+        items = [so for so in doc.get("smart_orders", []) if so.get("status") == "ACTIVE"]
+        return {"items": items}
+
+    api_ = _groww_client(token)
+    items = await _list_active_smart_orders(api_)
+    # Normalise to a small subset of fields the frontend actually uses, so
+    # downstream rendering doesn't depend on Groww's exact key names.
+    out: List[Dict[str, Any]] = []
+    for so in items:
+        out.append({
+            "smart_order_id": so.get("smart_order_id") or so.get("id"),
+            "trading_symbol": so.get("trading_symbol") or so.get("symbol"),
+            "smart_order_type": so.get("smart_order_type") or so.get("type"),
+            "status": so.get("status") or "ACTIVE",
+            "tp_price": so.get("target", {}).get("trigger_price") if isinstance(so.get("target"), dict) else so.get("tp_price"),
+            "sl_price": so.get("stop_loss", {}).get("trigger_price") if isinstance(so.get("stop_loss"), dict) else so.get("sl_price"),
+            "trigger_price": so.get("trigger_price"),
+            "trigger_direction": so.get("trigger_direction"),
+            "quantity": so.get("quantity"),
+        })
+    return {"items": out}
 
 
 # ---------------------------------------------------------------------------
