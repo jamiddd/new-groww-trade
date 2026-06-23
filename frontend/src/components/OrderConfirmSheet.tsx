@@ -14,6 +14,13 @@ export type OrderPreview = {
   fallback_reason?: string | null;
   error?: string | null;
   order?: { trading_symbol?: string; transaction_type?: string; order_type?: string; price?: number };
+  protective_preview?: {
+    entry_price?: number;
+    sl_price?: number;
+    tp_price?: number;
+    sl_pct?: number;
+    tp_pct?: number;
+  } | null;
 };
 
 type Props = {
@@ -122,6 +129,38 @@ export default function OrderConfirmSheet({
               value={`${(ord.order_type || preset.order_type || "MARKET")}${isLimit && ord.price ? ` @ ${formatMoney(Number(ord.price))}` : ""}`}
             />
           </View>
+
+          {preview.protective_preview &&
+          ((preview.protective_preview.sl_price ?? 0) > 0 ||
+            (preview.protective_preview.tp_price ?? 0) > 0) ? (
+            <View style={styles.card}>
+              <Text style={styles.cardLabel}>PROTECTION (auto-armed after fill)</Text>
+              {(preview.protective_preview.tp_price ?? 0) > 0 ? (
+                <Row
+                  label="TAKE PROFIT"
+                  value={`${formatMoney(preview.protective_preview.tp_price ?? 0)}  (+${
+                    preview.protective_preview.tp_pct ?? 0
+                  }%)`}
+                  valueColor={Colors.pnlPositive}
+                />
+              ) : null}
+              {(preview.protective_preview.sl_price ?? 0) > 0 ? (
+                <Row
+                  label="STOP LOSS"
+                  value={`${formatMoney(preview.protective_preview.sl_price ?? 0)}  (−${
+                    preview.protective_preview.sl_pct ?? 0
+                  }%)`}
+                  valueColor={Colors.pnlNegative}
+                />
+              ) : null}
+              <Text style={styles.protectHint}>
+                {(preview.protective_preview.sl_price ?? 0) > 0 &&
+                (preview.protective_preview.tp_price ?? 0) > 0
+                  ? "OCO smart order — whichever hits first cancels the other."
+                  : "Single GTT smart order — auto-exits when triggered."}
+              </Text>
+            </View>
+          ) : null}
         </>
       )}
 
@@ -150,11 +189,29 @@ export default function OrderConfirmSheet({
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+function Row({
+  label,
+  value,
+  bold,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  valueColor?: string;
+}) {
   return (
     <View style={styles.kvRow}>
       <Text style={styles.kvLabel}>{label}</Text>
-      <Text style={[styles.kvValue, bold && { fontWeight: "bold", color: Colors.text }]}>{value}</Text>
+      <Text
+        style={[
+          styles.kvValue,
+          bold && { fontWeight: "bold", color: Colors.text },
+          valueColor ? { color: valueColor, fontWeight: "bold" } : null,
+        ]}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -177,6 +234,21 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 12,
     gap: 6,
+  },
+  cardLabel: {
+    fontFamily: FONT,
+    fontSize: 10,
+    color: Colors.textSecondary,
+    fontWeight: "bold",
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  protectHint: {
+    fontFamily: FONT,
+    fontSize: 11,
+    color: Colors.textMuted,
+    fontStyle: "italic",
+    marginTop: 4,
   },
   kvRow: {
     flexDirection: "row",

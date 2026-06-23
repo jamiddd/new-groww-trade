@@ -124,10 +124,10 @@ class Preset(BaseModel):
 
 
 DEFAULT_PRESETS: List[Preset] = [
-    Preset(key="breakout_mkt", label="BUY BREAKOUT CALL MKT", strike_selection="HIGH_GAMMA", iv_filter="LOW_IV", position_sizing_pct=25.0, stop_loss_pct=5.0, order_type="MARKET"),
-    Preset(key="breakout_chaser_lmt", label="BUY BREAKOUT CHASER CALL LMT", strike_selection="HIGH_GAMMA", iv_filter="LOW_IV", position_sizing_pct=25.0, stop_loss_pct=5.0, order_type="LIMIT", limit_offset_pct=0.5),
-    Preset(key="steady_mkt", label="BUY STEADY CALL MKT", strike_selection="ATM", iv_filter="ANY", position_sizing_pct=20.0, stop_loss_pct=4.0, order_type="MARKET"),
-    Preset(key="steady_lmt", label="BUY STEADY CALL LMT", strike_selection="ATM", iv_filter="ANY", position_sizing_pct=20.0, stop_loss_pct=4.0, order_type="LIMIT", limit_offset_pct=0.3),
+    Preset(key="breakout_mkt", label="BUY BREAKOUT CALL MKT", strike_selection="HIGH_GAMMA", iv_filter="LOW_IV", position_sizing_pct=25.0, stop_loss_pct=5.0, take_profit_pct=10.0, order_type="MARKET"),
+    Preset(key="breakout_chaser_lmt", label="BUY BREAKOUT CHASER CALL LMT", strike_selection="HIGH_GAMMA", iv_filter="LOW_IV", position_sizing_pct=25.0, stop_loss_pct=5.0, take_profit_pct=10.0, order_type="LIMIT", limit_offset_pct=0.5),
+    Preset(key="steady_mkt", label="BUY STEADY CALL MKT", strike_selection="ATM", iv_filter="ANY", position_sizing_pct=20.0, stop_loss_pct=4.0, take_profit_pct=8.0, order_type="MARKET"),
+    Preset(key="steady_lmt", label="BUY STEADY CALL LMT", strike_selection="ATM", iv_filter="ANY", position_sizing_pct=20.0, stop_loss_pct=4.0, take_profit_pct=8.0, order_type="LIMIT", limit_offset_pct=0.3),
 ]
 
 
@@ -1036,6 +1036,137 @@ async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) 
     return 0.0
 
 
+def _round_tick(price: float) -> float:
+    """Round a price to the nearest 0.05 — the standard Groww options tick."""
+    if price <= 0:
+        return 0.0
+    return round(round(price * 20.0) / 20.0, 2)
+
+
+def _compute_sl_tp(entry_price: float, sl_pct: float, tp_pct: float) -> Dict[str, float]:
+    """Returns a {sl, tp} dict of rounded trigger prices. 0 means "not set"."""
+    sl = _round_tick(entry_price * (1 - sl_pct / 100.0)) if sl_pct > 0 and entry_price > 0 else 0.0
+    tp = _round_tick(entry_price * (1 + tp_pct / 100.0)) if tp_pct > 0 and entry_price > 0 else 0.0
+    return {"sl": sl, "tp": tp}
+
+
+async def _arm_protective_order(
+    api_: GrowwAPI,
+    *,
+    trading_symbol: str,
+    exchange: str,
+    quantity: int,
+    entry_price: float,
+    sl_pct: float,
+    tp_pct: float,
+) -> Optional[Dict[str, Any]]:
+    """
+    After a successful BUY, arm a protective Groww smart order so the position
+    auto-exits at SL or TP without the trader watching the screen.
+
+    Groww has no traditional bracket order — instead it exposes "smart orders":
+      - OCO (One-Cancels-Other): pair of legs (target + stop_loss). When one
+        triggers, the other is auto-cancelled. Perfect for SL+TP together.
+      - GTT (Good Till Triggered): single trigger price + direction.
+
+    We pick OCO when both SL & TP are set, otherwise a single GTT.
+    Returns the smart-order metadata (or `{"error": ...}` on failure) so the
+    frontend can surface the protection alongside the BUY response.
+    """
+    if quantity <= 0 or entry_price <= 0:
+        return None
+    if sl_pct <= 0 and tp_pct <= 0:
+        return None
+
+    levels = _compute_sl_tp(entry_price, sl_pct, tp_pct)
+    sl_price, tp_price = levels["sl"], levels["tp"]
+
+    common = dict(
+        segment=GrowwAPI.SEGMENT_FNO,
+        trading_symbol=trading_symbol,
+        exchange=exchange,
+        quantity=int(quantity),
+        product_type=GrowwAPI.PRODUCT_NRML,
+        duration=GrowwAPI.VALIDITY_DAY,
+    )
+
+    try:
+        if sl_price > 0 and tp_price > 0:
+            resp = await _call_blocking(
+                api_.create_smart_order,
+                smart_order_type=GrowwAPI.SMART_ORDER_TYPE_OCO,
+                **common,
+                net_position_quantity=int(quantity),
+                target={
+                    "trigger_price": f"{tp_price:.2f}",
+                    "order_type": GrowwAPI.ORDER_TYPE_MARKET,
+                },
+                stop_loss={
+                    "trigger_price": f"{sl_price:.2f}",
+                    "order_type": GrowwAPI.ORDER_TYPE_MARKET,
+                },
+                transaction_type=GrowwAPI.TRANSACTION_TYPE_SELL,
+            )
+            return {
+                "type": "OCO",
+                "entry_price": entry_price,
+                "tp_price": tp_price,
+                "sl_price": sl_price,
+                "tp_pct": tp_pct,
+                "sl_pct": sl_pct,
+                "response": resp,
+            }
+        if sl_price > 0:
+            resp = await _call_blocking(
+                api_.create_smart_order,
+                smart_order_type=GrowwAPI.SMART_ORDER_TYPE_GTT,
+                **common,
+                trigger_price=f"{sl_price:.2f}",
+                trigger_direction=GrowwAPI.TRIGGER_DIRECTION_DOWN,
+                order={
+                    "order_type": GrowwAPI.ORDER_TYPE_MARKET,
+                    "transaction_type": GrowwAPI.TRANSACTION_TYPE_SELL,
+                },
+            )
+            return {
+                "type": "GTT_SL",
+                "entry_price": entry_price,
+                "sl_price": sl_price,
+                "sl_pct": sl_pct,
+                "response": resp,
+            }
+        # tp_price > 0 path
+        resp = await _call_blocking(
+            api_.create_smart_order,
+            smart_order_type=GrowwAPI.SMART_ORDER_TYPE_GTT,
+            **common,
+            trigger_price=f"{tp_price:.2f}",
+            trigger_direction=GrowwAPI.TRIGGER_DIRECTION_UP,
+            order={
+                "order_type": GrowwAPI.ORDER_TYPE_MARKET,
+                "transaction_type": GrowwAPI.TRANSACTION_TYPE_SELL,
+            },
+        )
+        return {
+            "type": "GTT_TP",
+            "entry_price": entry_price,
+            "tp_price": tp_price,
+            "tp_pct": tp_pct,
+            "response": resp,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to arm protective order for %s: %s", trading_symbol, exc)
+        return {
+            "error": str(exc),
+            "entry_price": entry_price,
+            "sl_price": sl_price,
+            "tp_price": tp_price,
+            "sl_pct": sl_pct,
+            "tp_pct": tp_pct,
+        }
+
+
+
 def _fallback_pick_from_master(
     token: str,
     underlying: str,
@@ -1158,6 +1289,12 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             )
 
         if payload.dry_run:
+            entry_demo = ltp if order_type_str == "MARKET" else round(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100), 1)
+            demo_levels = _compute_sl_tp(
+                entry_demo,
+                float(preset_doc.get("stop_loss_pct") or 0),
+                float(preset_doc.get("take_profit_pct") or 0),
+            )
             return {
                 "dry_run": True,
                 "preset": preset_doc,
@@ -1172,6 +1309,13 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                     "transaction_type": "BUY",
                     "order_type": order_type_str,
                     "price": 0 if order_type_str == "MARKET" else round(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100), 1),
+                },
+                "protective_preview": {
+                    "entry_price": entry_demo,
+                    "sl_price": demo_levels["sl"],
+                    "tp_price": demo_levels["tp"],
+                    "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
+                    "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
                 },
             }
 
@@ -1203,6 +1347,38 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             "exchange_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         })
         await _save_demo_state(token, doc)
+        demo_protect_levels = _compute_sl_tp(
+            ltp,
+            float(preset_doc.get("stop_loss_pct") or 0),
+            float(preset_doc.get("take_profit_pct") or 0),
+        )
+        demo_protective: Optional[Dict[str, Any]] = None
+        if demo_protect_levels["sl"] > 0 and demo_protect_levels["tp"] > 0:
+            demo_protective = {
+                "type": "OCO",
+                "entry_price": ltp,
+                "sl_price": demo_protect_levels["sl"],
+                "tp_price": demo_protect_levels["tp"],
+                "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
+                "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
+                "response": {"smart_order_id": f"demo-oco-{uuid.uuid4().hex[:6]}", "status": "ACTIVE"},
+            }
+        elif demo_protect_levels["sl"] > 0:
+            demo_protective = {
+                "type": "GTT_SL",
+                "entry_price": ltp,
+                "sl_price": demo_protect_levels["sl"],
+                "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
+                "response": {"smart_order_id": f"demo-gtt-{uuid.uuid4().hex[:6]}", "status": "ACTIVE"},
+            }
+        elif demo_protect_levels["tp"] > 0:
+            demo_protective = {
+                "type": "GTT_TP",
+                "entry_price": ltp,
+                "tp_price": demo_protect_levels["tp"],
+                "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
+                "response": {"smart_order_id": f"demo-gtt-{uuid.uuid4().hex[:6]}", "status": "ACTIVE"},
+            }
         return {
             "preset": preset_doc,
             "selected": {"trading_symbol": unique_symbol, "strike": strike, "ltp": ltp},
@@ -1212,6 +1388,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             "estimated_cost": round(qty * ltp, 2),
             "order": {"trading_symbol": unique_symbol, "transaction_type": "BUY", "order_type": order_type_str},
             "response": {"order_id": order_id, "status": "EXECUTED"},
+            "protective_order": demo_protective,
             "demo": True,
         }
 
@@ -1363,6 +1540,15 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     }
 
     if payload.dry_run:
+        # Preview the protective SL/TP that will be armed automatically
+        # after the BUY fills. Helps the user double-check before tapping
+        # CONFIRM.
+        entry_preview = price if order_type == "LIMIT" and price > 0 else float(pick.get("ltp") or 0)
+        protect_levels = _compute_sl_tp(
+            entry_preview,
+            float(preset_doc.get("stop_loss_pct") or 0),
+            float(preset_doc.get("take_profit_pct") or 0),
+        )
         return {
             "dry_run": True,
             "preset": preset_doc,
@@ -1374,6 +1560,13 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             "order": order_payload,
             "spot": spot,
             "fallback_reason": fallback_reason,
+            "protective_preview": {
+                "entry_price": entry_preview,
+                "sl_price": protect_levels["sl"],
+                "tp_price": protect_levels["tp"],
+                "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
+                "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
+            },
         }
 
     logger.info("placing order: %s", order_payload)
@@ -1395,6 +1588,25 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         raise HTTPException(status_code=502, detail=f"Order placement failed: {exc}") from exc
     logger.info("groww place_order resp: %s", resp)
 
+    # Arm an OCO/GTT smart order so the position auto-exits at SL/TP
+    # without the trader having to babysit it. Best-effort — never fails
+    # the parent BUY response. Frontend gets the metadata in
+    # `protective_order` for display.
+    entry_for_protect = (
+        order_payload["price"]
+        if order_type == "LIMIT" and order_payload["price"] > 0
+        else float(pick.get("ltp") or 0)
+    )
+    protective = await _arm_protective_order(
+        api_,
+        trading_symbol=pick["trading_symbol"],
+        exchange=payload.exchange,
+        quantity=quantity,
+        entry_price=entry_for_protect,
+        sl_pct=float(preset_doc.get("stop_loss_pct") or 0),
+        tp_pct=float(preset_doc.get("take_profit_pct") or 0),
+    )
+
     # Log to mongo
     await db.order_logs.insert_one({
         "id": str(uuid.uuid4()),
@@ -1405,10 +1617,19 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         "selected": pick,
         "order_payload": order_payload,
         "groww_response": resp,
+        "protective_order": protective,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
-    return {"selected": pick, "quantity": quantity, "lots": lots, "lot_size": lot_size, "order": order_payload, "response": resp}
+    return {
+        "selected": pick,
+        "quantity": quantity,
+        "lots": lots,
+        "lot_size": lot_size,
+        "order": order_payload,
+        "response": resp,
+        "protective_order": protective,
+    }
 
 
 @api.post("/orders/exit")
