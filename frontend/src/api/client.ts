@@ -121,6 +121,7 @@ export const api = {
       auth: false,
     }),
   margin: () => req<any>("/account/margin"),
+  refreshCapital: () => req<{ ok: boolean }>("/account/refresh-capital", { method: "POST" }),
   positions: () => req<any>("/account/positions"),
   orders: () => req<any>("/account/orders"),
   smartOrders: () =>

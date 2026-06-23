@@ -169,25 +169,20 @@ export default function Home() {
         api.positions(),
         api.smartOrders().catch(() => ({ items: [] })),
       ]);
-      // Try to be flexible about Groww's payload shape
-      const eq =
-        m?.equity?.available_cash ??
-        m?.equity?.net_marginUsed ??
+      // Backend now exposes canonical fields:
+      //   m.available_margin     → live total trading balance (cash + used + collateral)
+      //   m.opening_capital_today → that same number snapshotted at start of day
+      // So PnL today = balance - capital, no extra arithmetic needed.
+      const liveTotal = Number(
         m?.available_margin ??
-        m?.net_margin_available ??
-        m?.cash ??
-        m?.net ??
-        0;
-      const used = m?.used_margin ?? m?.margin_used ?? 0;
-      const opening = m?.opening_capital_today;
-      setBalance(Number(eq) || 0);
-      // Capital = opening balance of the day (snapshotted server-side on the
-      // first margin call of the day) so it doesn't shift as positions move.
-      setCapital(
-        opening !== undefined && opening !== null
-          ? Number(opening) || 0
-          : (Number(eq) || 0) + (Number(used) || 0),
-      );
+          m?.total_balance ??
+          // Last-resort fallback for old payload shapes:
+          (Number(m?.equity?.available_cash ?? m?.cash ?? 0) +
+            Number(m?.used_margin ?? 0)),
+      ) || 0;
+      const opening = Number(m?.opening_capital_today ?? liveTotal) || 0;
+      setBalance(liveTotal);
+      setCapital(opening);
       const positionsList: Position[] =
         p?.positions || p?.data || p?.items || (Array.isArray(p) ? p : []);
       setPositions(positionsList.filter((x) => (x.net_quantity || x.quantity || 0) !== 0));
@@ -458,6 +453,21 @@ export default function Home() {
         <View style={styles.card}>
           <View style={styles.dotRow}>
             <Text style={styles.dotLabel}>Capital</Text>
+            <TouchableOpacity
+              onPress={async () => {
+                try {
+                  await api.refreshCapital();
+                  await loadAll();
+                } catch {
+                  /* ignore */
+                }
+              }}
+              testID="capital-refresh"
+              style={styles.capitalRefreshBtn}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Feather name="refresh-cw" size={11} color={Colors.textMuted} />
+            </TouchableOpacity>
             <View style={styles.dotFill} />
             <Text style={styles.dotValue}>{formatMoney(capital)}</Text>
           </View>
@@ -949,6 +959,11 @@ const styles = StyleSheet.create({
   },
   dotRow: { flexDirection: "row", alignItems: "flex-end", marginVertical: 4 },
   dotLabel: { fontFamily: FONT, fontSize: 13, color: Colors.text },
+  capitalRefreshBtn: {
+    marginLeft: 6,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
   dotFill: {
     flex: 1,
     borderBottomWidth: 1,

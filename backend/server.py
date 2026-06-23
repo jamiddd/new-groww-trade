@@ -647,6 +647,63 @@ def _find_numeric_by_keys(obj: Any, key_subs: List[str]) -> Optional[float]:
     return None
 
 
+def _sum_numeric_by_keys(obj: Any, key_subs: List[str]) -> float:
+    """Recursively sum every numeric value whose key contains any of the
+    given substrings. Used to roll up cash/used/collateral across the
+    multiple per-segment buckets Groww's `/margins/detail/user` returns
+    (`equity_margin_details`, `commodity_margin_details`, ...)."""
+    total = 0.0
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (int, float)) and any(s in k.lower() for s in key_subs):
+                try:
+                    total += float(v)
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                total += _sum_numeric_by_keys(v, key_subs)
+    elif isinstance(obj, list):
+        for v in obj:
+            total += _sum_numeric_by_keys(v, key_subs)
+    return total
+
+
+def _compute_total_trading_balance(margin_data: Any) -> Dict[str, float]:
+    """Resolve the user's full trading capital from a `get_available_margin
+    _details` response. We need to add together every bucket — free cash +
+    blocked margin + pledged/collateral — across every segment, because
+    that's the number Groww's mobile app shows as 'Total trading balance'.
+
+    Returns {available, used, collateral, total}.
+    """
+    if not isinstance(margin_data, (dict, list)):
+        return {"available": 0.0, "used": 0.0, "collateral": 0.0, "total": 0.0}
+
+    # Sum ALL leaf numeric values whose key suggests cash / used / collateral.
+    # These substrings cover every Groww field name observed so far:
+    available = _sum_numeric_by_keys(
+        margin_data,
+        ["clear_cash", "available_cash", "cash_available"],
+    )
+    used = _sum_numeric_by_keys(
+        margin_data, ["net_margin_used", "margin_used", "utilised"],
+    )
+    collateral = _sum_numeric_by_keys(
+        margin_data, ["collateral_value", "collateral_available"],
+    )
+    total = available + used + collateral
+    return {
+        "available": round(available, 2),
+        "used": round(used, 2),
+        "collateral": round(collateral, 2),
+        "total": round(total, 2),
+    }
+
+
+def _user_key(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()[:24]
+
+
 @api.get("/account/margin")
 async def margin(token: str = Depends(require_token)):
     if _is_demo(token):
@@ -660,31 +717,110 @@ async def margin(token: str = Depends(require_token)):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Defensive extraction — Groww's `/margins/detail/user` returns
-    # `equity_margin_details.{clear_cash, net_margin_used, ...}` (and
-    # similarly for commodity / collateral). Walk the response recursively.
-    eq = (
-        _find_numeric_by_keys(data, ["available_cash", "clear_cash", "available_margin", "net_margin_available", "cash_available"]) or 0.0
+    # Defensive: roll up every cash/used/collateral bucket across every
+    # segment Groww returns. Single-bucket extraction was missing parts of
+    # the user's actual capital, which is what caused the visible mismatch.
+    summary = _compute_total_trading_balance(data)
+    total_now = summary["total"]
+    logger.info(
+        "margin extract: avail=%s used=%s collateral=%s total=%s",
+        summary["available"], summary["used"], summary["collateral"], total_now,
     )
-    used = (
-        _find_numeric_by_keys(data, ["net_margin_used", "used_margin", "margin_used", "utilised"]) or 0.0
-    )
-    total_now = float(eq) + float(used)
-    logger.info("margin extract: cash=%s used=%s total_now=%s keys=%s", eq, used, total_now, list(data.keys()) if isinstance(data, dict) else type(data))
 
     today_iso = datetime.now(timezone.utc).date().isoformat()
-    user_key = hashlib.sha256(token.encode()).hexdigest()[:24]
+    user_key = _user_key(token)
     snap = await db.opening_capital.find_one({"user": user_key, "date": today_iso}, {"_id": 0})
     if not snap and total_now > 0:
         snap = {"user": user_key, "date": today_iso, "capital": total_now}
         await db.opening_capital.insert_one(snap)
+    opening = float(snap["capital"]) if snap else total_now
+
     if isinstance(data, dict):
-        data["opening_capital_today"] = float(snap["capital"]) if snap else total_now
-        # Mirror the canonical fields the frontend reads, so legacy probes
-        # also work cleanly.
-        data.setdefault("available_margin", eq)
-        data.setdefault("used_margin", used)
+        data["opening_capital_today"] = opening
+        # Canonical fields the frontend reads:
+        # `available_margin` is the LIVE total balance (sum of all buckets);
+        # `used_margin` is what's currently blocked. PnL today = total - opening.
+        data["available_margin"] = total_now
+        data["used_margin"] = summary["used"]
+        data["collateral"] = summary["collateral"]
+        data["available_cash"] = summary["available"]
+        data["total_balance"] = total_now
     return data
+
+
+@api.post("/account/refresh-capital")
+async def refresh_capital(token: str = Depends(require_token)):
+    """Clear today's opening-capital snapshot so the next margin call
+    re-snapshots from Groww. Useful when the user notices the displayed
+    Capital value is wrong (e.g. they topped up their account, or the very
+    first call of the day caught a partial response)."""
+    if _is_demo(token):
+        return {"ok": True, "demo": True}
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    await db.opening_capital.delete_many({"user": _user_key(token), "date": today_iso})
+    return {"ok": True}
+
+
+def _merge_position_lists(*sources: Any) -> Dict[str, Any]:
+    """Concatenate position arrays from multiple Groww segment responses
+    (FNO + CASH) into a single normalised payload."""
+    merged: List[Dict[str, Any]] = []
+    for s in sources:
+        items: List[Dict[str, Any]] = []
+        if isinstance(s, dict):
+            items = s.get("positions") or s.get("data") or []
+        elif isinstance(s, list):
+            items = s
+        for item in items:
+            if isinstance(item, dict):
+                merged.append(item)
+    return {"positions": merged}
+
+
+def _merge_order_lists(*sources: Any) -> Dict[str, Any]:
+    """Concatenate order arrays from multiple Groww segment responses,
+    sorted by exchange_time / created_at descending so the newest order
+    is on top — regardless of which segment it came from."""
+    merged: List[Dict[str, Any]] = []
+    for s in sources:
+        items: List[Dict[str, Any]] = []
+        if isinstance(s, dict):
+            # Groww has used several different envelope keys over time —
+            # be liberal about which one carries the order array so we
+            # don't silently render an empty list.
+            items = (
+                s.get("orders")
+                or s.get("order_list")
+                or s.get("data")
+                or s.get("items")
+                or s.get("result")
+                or []
+            )
+            # Some responses wrap the array one level deeper.
+            if isinstance(items, dict):
+                items = (
+                    items.get("orders")
+                    or items.get("order_list")
+                    or items.get("items")
+                    or items.get("data")
+                    or []
+                )
+        elif isinstance(s, list):
+            items = s
+        for item in items:
+            if isinstance(item, dict):
+                merged.append(item)
+    def _ts(o: Dict[str, Any]) -> str:
+        return str(
+            o.get("exchange_time")
+            or o.get("order_creation_time")
+            or o.get("created_at")
+            or o.get("created_on")
+            or o.get("order_time")
+            or ""
+        )
+    merged.sort(key=_ts, reverse=True)
+    return {"orders": merged}
 
 
 @api.get("/account/positions")
@@ -692,11 +828,20 @@ async def positions(token: str = Depends(require_token)):
     if _is_demo(token):
         return await _demo_positions(token)
     api_ = _groww_client(token)
-    try:
-        data = await _call_blocking(api_.get_positions_for_user, GrowwAPI.SEGMENT_FNO)
-        return data
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    # Fetch open positions from every segment so a position the user
+    # opened via the regular Groww app (e.g. an equity buy in CASH segment)
+    # also shows up here. Each call is independent — a 502 from one
+    # shouldn't black-hole the others.
+    async def _safe(segment: str) -> Any:
+        try:
+            return await _call_blocking(api_.get_positions_for_user, segment)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("positions fetch (%s) failed: %s", segment, exc)
+            return None
+
+    fno = await _safe(GrowwAPI.SEGMENT_FNO)
+    cash = await _safe(GrowwAPI.SEGMENT_CASH)
+    return _merge_position_lists(fno, cash)
 
 
 @api.get("/account/orders")
@@ -704,11 +849,55 @@ async def orders_history(page: int = 0, page_size: int = 50, token: str = Depend
     if _is_demo(token):
         return await _demo_orders(token)
     api_ = _groww_client(token)
-    try:
-        data = await _call_blocking(api_.get_order_list, page, page_size, GrowwAPI.SEGMENT_FNO)
-        return data
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    async def _safe(segment: Optional[str]) -> Any:
+        try:
+            # The SDK only forwards `segment` and `page` to Groww's API
+            # — page_size is ignored — but we keep the kwarg so the
+            # signature stays explicit.
+            return await _call_blocking(api_.get_order_list, page, page_size, segment)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("order_list fetch (%s) failed: %s", segment, exc)
+            return None
+
+    # Try every relevant source. Groww's /order/list returns the user's
+    # full order book when called WITHOUT a segment param — but some
+    # accounts only get the active page filtered by segment. So we
+    # combine: ALL + FNO + CASH and dedupe by order_id below.
+    # FNO + CASH covers options, futures, and equity orders — i.e. everything
+    # the user can place via Groww's own app.
+    no_segment = await _safe(None)
+    fno = await _safe(GrowwAPI.SEGMENT_FNO)
+    cash = await _safe(GrowwAPI.SEGMENT_CASH)
+
+    # Diagnostic so we can debug "empty list" reports without the user
+    # having to do anything special.
+    for tag, payload in (("ALL", no_segment), ("FNO", fno), ("CASH", cash)):
+        if isinstance(payload, dict):
+            logger.info(
+                "order_list[%s] keys=%s sample_keys=%s",
+                tag,
+                list(payload.keys()),
+                list((payload.get("orders") or payload.get("order_list") or payload.get("data") or [{}])[:1] and
+                     (payload.get("orders") or payload.get("order_list") or payload.get("data") or [{}])[0].keys()) if (payload.get("orders") or payload.get("order_list") or payload.get("data")) else None,
+            )
+        elif isinstance(payload, list):
+            logger.info("order_list[%s] list len=%d", tag, len(payload))
+        else:
+            logger.info("order_list[%s] raw=%r", tag, payload)
+
+    merged = _merge_order_lists(no_segment, fno, cash)
+    # Dedupe by order_id — when both a no-segment and per-segment fetch
+    # return the same order, keep the first occurrence.
+    seen: set = set()
+    unique: List[Dict[str, Any]] = []
+    for o in merged.get("orders", []):
+        oid = o.get("order_id") or o.get("id") or o.get("groww_order_id")
+        if oid and oid in seen:
+            continue
+        if oid:
+            seen.add(oid)
+        unique.append(o)
+    return {"orders": unique}
 
 
 # ---------------------------------------------------------------------------
