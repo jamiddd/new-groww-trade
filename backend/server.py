@@ -1318,6 +1318,72 @@ async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) 
     return 0.0
 
 
+async def _below_price_pct_last_hour(
+    api_: GrowwAPI,
+    *,
+    trading_symbol: str,
+    exchange: str,
+    current_price: float,
+) -> Optional[Dict[str, Any]]:
+    """How much of the last hour has this option traded BELOW the current
+    price? Returns {"pct": int 0..100, "samples": int} or None on failure.
+
+    A high value (e.g. 80%) means the price has spent most of the hour
+    cheaper than right now → likely chasing a spike. A low value (e.g. 20%)
+    means we're near the bottom of the recent range → potentially a better
+    entry. Surfaced as a one-line "context" helper in the confirm dialog
+    so the user can sense-check the timing before pressing BUY.
+    """
+    if current_price <= 0 or not trading_symbol:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+    except Exception:  # noqa: BLE001
+        now_ist = datetime.now(timezone.utc)
+    start_str = (now_ist - timedelta(minutes=60)).strftime("%Y-%m-%d %H:%M:%S")
+    end_str = now_ist.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        resp = await _call_blocking(
+            api_.get_historical_candle_data,
+            trading_symbol,
+            exchange,
+            GrowwAPI.SEGMENT_FNO,
+            start_str,
+            end_str,
+            1,  # interval_in_minutes = 1
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("historical candle fetch failed (%s): %s", trading_symbol, exc)
+        return None
+
+    # Groww may return {"candles": [[ts, o, h, l, c, v], ...]} or a flat list.
+    candles: List[Any] = []
+    if isinstance(resp, dict):
+        candles = resp.get("candles") or resp.get("data") or []
+    elif isinstance(resp, list):
+        candles = resp
+    if not candles:
+        return None
+
+    below = 0
+    total = 0
+    for row in candles:
+        # Each row is typically [ts, open, high, low, close, volume]
+        if not isinstance(row, (list, tuple)) or len(row) < 5:
+            continue
+        try:
+            close = float(row[4])
+        except (TypeError, ValueError):
+            continue
+        total += 1
+        if close < current_price:
+            below += 1
+    if total == 0:
+        return None
+    return {"pct": round(below * 100 / total), "samples": total}
+
+
 def _round_tick(price: float) -> float:
     """Round a price to the nearest 0.05 — the standard Groww options tick."""
     if price <= 0:
@@ -1692,6 +1758,13 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                     "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
                     "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
                 },
+                # Demo helper — deterministic-ish but varies enough that
+                # the UI shows the indicator working without needing a
+                # live Groww historical-candle call.
+                "below_price_pct": {
+                    "pct": random.randint(30, 75),
+                    "samples": 60,
+                },
             }
 
         doc = await _demo_state_for(token)
@@ -1972,6 +2045,14 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             float(preset_doc.get("stop_loss_pct") or 0),
             float(preset_doc.get("take_profit_pct") or 0),
         )
+        # Time-in-range context — only fetched on dry-run (the user is
+        # idling on the confirmation dialog, latency is fine here).
+        below_ctx = await _below_price_pct_last_hour(
+            api_,
+            trading_symbol=pick["trading_symbol"],
+            exchange=payload.exchange,
+            current_price=float(pick.get("ltp") or 0),
+        )
         return {
             "dry_run": True,
             "preset": preset_doc,
@@ -1990,6 +2071,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
                 "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
             },
+            "below_price_pct": below_ctx,
         }
 
     logger.info("placing order: %s", order_payload)

@@ -21,6 +21,8 @@ export type OrderPreview = {
     sl_pct?: number;
     tp_pct?: number;
   } | null;
+  /** Helper context: % of last hour the option's close traded below the current LTP. */
+  below_price_pct?: { pct: number; samples: number } | null;
 };
 
 type Props = {
@@ -109,6 +111,16 @@ export default function OrderConfirmSheet({
             const limitPx = isLimit ? Number(ord.price || 0) : 0;
             const entryPx = limitPx > 0 ? limitPx : ltp;
             if (!entryPx) return null;
+            const ctx = preview.below_price_pct;
+            // "Cheap zone" if the price has spent ≤30% of the last hour
+            // below the current LTP — i.e., we're near the recent low.
+            // Anything ≥60% means we're chasing.
+            const ctxColor =
+              ctx && ctx.pct >= 60
+                ? Colors.pnlNegative
+                : ctx && ctx.pct <= 30
+                ? Colors.pnlPositive
+                : Colors.textSecondary;
             return (
               <View style={styles.heroPriceBlock}>
                 <Text style={styles.heroPriceLabel}>
@@ -123,6 +135,15 @@ export default function OrderConfirmSheet({
                     <Text style={{ color: Colors.pnlNegative, fontWeight: "bold" }}>
                       {((entryPx - ltp) / ltp * 100).toFixed(2)}%
                     </Text>
+                  </Text>
+                ) : null}
+                {ctx ? (
+                  <Text style={styles.heroPriceCtx} testID="below-price-pct">
+                    Below current price{" "}
+                    <Text style={{ color: ctxColor, fontWeight: "bold" }}>
+                      {ctx.pct}%
+                    </Text>{" "}
+                    of last hour
                   </Text>
                 ) : null}
               </View>
@@ -291,6 +312,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textSecondary,
     marginTop: 6,
+  },
+  heroPriceCtx: {
+    fontFamily: FONT,
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 4,
   },
   cardLabel: {
     fontFamily: FONT,
