@@ -1,0 +1,30 @@
+{
+  "summary": "Re-test of /home ACTIONS panel EXIT ALL button after main agent applied the recommended refactor (dropped `flex: 1` from styles.exitBtn and kept it only on styles.exitPartial; styles.exitAll has no flex applied, only backgroundColor + marginTop + alignSelf:'stretch'). ALL 3 viewport checks PASS. exit-all-button getBoundingClientRect().height now equals exitBtnHeight exactly on every viewport (56/60/66 px on 390x844 / 412x915 / 412x1000). Computed style on the EXIT ALL button is `flex: 0 0 auto; flex-shrink: 0; flex-basis: auto; height: <inline>px; align-self: stretch` — exactly the desired state. Bottom edge is inside the viewport on all 3 (832<=844, 903<=915, 988<=1000). REGRESSION (exit-25 / exit-50): both still render side-by-side with matching heights equal to exit-all (56/60/66) — flex:1 still active via exitPartial. REGRESSION (header-expiry-button): tapping opens expiry-sheet (popover-style), outside-tap (10,10) dismisses it cleanly. Bug from iteration_3 is RESOLVED. No deprecation issues newly introduced; pre-existing react-native-web `shadow*` deprecation warning is unrelated to this fix.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "react-native-web shadow* style props (pre-existing, not introduced by this fix)",
+        "issue": "Console emits `\"shadow*\" style props are deprecated. Use \"boxShadow\".` Originates from styles using shadowColor/shadowOpacity/shadowRadius/shadowOffset (e.g. styles.sheetSurface line ~1306-1309, styles.menuPanel ~1408-1411, styles.expiryPopover ~1473-1477). Reference: /app/frontend/app/home.tsx:1306. Low priority; only affects the web preview, but worth migrating to `boxShadow` ahead of the next react-native-web major."
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_4.json", "/app/test_reports/iteration_3.json"],
+  "action_items": [
+    "No action required for the EXIT ALL regression — fix is verified across all three target viewports.",
+    "(Optional / pre-existing) Audit remaining `shadow*` style props in home.tsx (sheetSurface, menuPanel, expiryPopover) and migrate to react-native-web's `boxShadow` to silence the deprecation warning."
+  ],
+  "critical_code_review_comments": [
+    "home.tsx is still 1527 lines — split-up into ActionsSheet / ExpiryPopover / styles modules remains advisable but is out of scope for this bug fix."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% — 5/5 checks pass (3 viewport height measurements + exit-25/50 regression + expiry popover open+dismiss)."},
+  "seed_data_creation": "localStorage seeded on origin: groww_access_token='FAKE_TOKEN_FOR_TEST', actions_collapsed=false. Backend returns 401 for /api/* calls (expected — token is fake), so positions / expiries are empty. This does not affect the layout test because the ACTIONS panel is rendered regardless of API state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "EXIT ALL height bug from iteration_3 is RESOLVED via the cleaner refactor: `flex: 1` lives only on styles.exitPartial; styles.exitBtn has no flex; styles.exitAll has no flex. Computed style verified as `flex: 0 0 auto`. If future tests touch any of these three style entries (exitBtn / exitPartial / exitAll) re-measure exit-all-button.getBoundingClientRect().height on viewports 390x844 / 412x915 / 412x1000 and assert it equals the dynamic exitBtnHeight (≈56/60/66).",
+  "rca_of_issue": "The original bug (EXIT ALL collapsing to 0 px) was caused by react-native-web emitting `flex: 0 1 0%` for the `flex: <int>` shorthand, which kept flexShrink at 1 and shrank the column-flex child that was already constrained on the height axis. The recommended fix — remove `flex: 1` from the shared styles.exitBtn (so it no longer cascades onto styles.exitAll) and keep it only on styles.exitPartial — has been applied and verified. Computed style on the EXIT ALL button is now `flex: 0 0 auto` (no shrink), and the inline `height` value is respected on all tested viewports."
+}

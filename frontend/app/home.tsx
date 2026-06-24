@@ -1389,13 +1389,12 @@ const styles = StyleSheet.create({
   buyText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", textAlign: "center", letterSpacing: 0.6 },
   exitRow: { flexDirection: "row", gap: 4, marginTop: 4 },
   exitBtn: {
-    flex: 1,
     borderRadius: 2,
     alignItems: "center",
     justifyContent: "center",
   },
   exitPartial: { flex: 1, backgroundColor: Colors.dangerDark },
-  exitAll: { backgroundColor: Colors.danger, marginTop: 4, flex: 0, alignSelf: "stretch" },
+  exitAll: { backgroundColor: Colors.danger, marginTop: 4, alignSelf: "stretch" },
   exitText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", fontSize: 12, letterSpacing: 0.6 },
 
   menuBackdrop: { flex: 1, backgroundColor: "transparent" },
