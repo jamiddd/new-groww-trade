@@ -1,0 +1,33 @@
+{
+  "summary": "Backend-only regression for per-underlying /api/instruments/expiries (NIFTY-vs-SENSEX leak fix). Created /app/backend/tests/test_demo_expiries.py with 19 tests covering NIFTY (Tuesday weeklies + last-Thu monthly), SENSEX (Thursday weeklies + last-Tue monthly), the bug assertion (NIFTY != SENSEX sets), monthly-only indices (BANKNIFTY/FINNIFTY/MIDCPNIFTY last-Thu; BANKEX last-Tue), RELIANCE last-Thu only, MCX calendar-day schedule (GOLD=5, CRUDEOIL=18, NATURALGAS=25), and missing-underlying → 422. RESULT: 19/19 PASSED against the deployed demo endpoint. Bug fix is verified — NIFTY and SENSEX expiry sets differ as documented, SENSEX no longer leaks NIFTY Tuesday weeklies (only legitimate last-Tuesday monthly overlaps remain, all ≤6, all confirmed as last-Tuesday-of-month). Frontend code-review of home.tsx loadExpiries (line 193-196) confirms the call chain `api.expiries(u, exchangeFor(u))` is intact and consistent with the other 3 call sites (preview interval line 402, onPresetPress line 429, placePreset line 460).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_demo_expiries.py",
+    "/app/test_reports/pytest/pytest_results_iter8.xml"
+  ],
+  "action_items": [
+    "Note (review-request accuracy): the request states the demo token is the literal string 'DEMO'. The actual DEMO_TOKEN constant in server.py line 217 is 'DEMO__SCALPX__TOKEN' — login.tsx requests it via POST /api/auth/login {api_key:'demo', api_secret:'demo'} and stores whatever the server returns. Sending header X-Groww-Token: DEMO does NOT trigger the demo path; it falls through to the live master CSV (which happens to be loaded in this preview env from a prior login). For accurate demo-endpoint testing, always use the value returned by /api/auth/login.",
+    "Optional follow-up: the existing /app/backend/tests/test_backend.py TestFakeToken cases now fail (5 pre-existing) because the live instrument master is cached, so 'fake' tokens still resolve to valid responses on /expiries and /positions. Not introduced by this iteration but main agent may want to update those tests' expectations or scope them to test_demo_expiries-style demo-token usage."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/server.py _demo_expiries(underlying) at line 431 — per-underlying schedule fully implemented: weekly_weekday=1 for NIFTY, 3 for SENSEX, None otherwise (line 449-454); monthly_weekday=1 for SENSEX/BANKEX else 3 (line 475); MCX_MONTH_DAY map at line 464-472 has GOLD/SILVER=5, CRUDEOIL=18, NATURALGAS=25, base-metals=28. Output verified live against the deployed endpoint.",
+    "/api/instruments/expiries endpoint at line 1216 — demo branch (line 1218-1219) cleanly delegates to _demo_expiries(underlying); live branch falls through to _live_expiries_from_master. underlying is a required str (no default) → FastAPI returns 422 when omitted (verified).",
+    "/app/frontend/app/home.tsx exchangeFor(u) at line 85-89 routes NIFTY→NSE, SENSEX/BANKEX→BSE, MCX commodities→MCX. loadExpiries at line 193-196 correctly invokes api.expiries(u, exchangeFor(u)) — no regression from the prior MCX iteration. 4 call sites consistent (195, 402, 429, 460).",
+    "Verified bug-fix end-to-end on deployed env (today=2026-06-24 UTC): NIFTY expiries = Tuesday-weekly cadence (2026-06-30, 07-07, 07-14, …) + last-Thursday monthlies (2026-08-25? actually 2026-08-27, 09-24); SENSEX expiries = Thursday-weekly cadence (2026-06-25, 07-02, 07-09, …) + last-Tuesday monthlies; sets are disjoint except for ≤6 last-Tuesday-of-month coincidences."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_demo_expiries.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (19/19 new tests)", "frontend": "N/A (skipped per request)"},
+  "seed_data_creation": "None — uses POST /api/auth/login {demo,demo} → DEMO_TOKEN ('DEMO__SCALPX__TOKEN') as X-Groww-Token.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Demo token = 'DEMO__SCALPX__TOKEN' (constant in server.py:217, returned by POST /api/auth/login {api_key:demo, api_secret:demo}). Sending the literal string 'DEMO' as X-Groww-Token does NOT trigger demo mode — it falls through to the live master CSV which is currently cached in this preview env. Test file /app/backend/tests/test_demo_expiries.py contains the canonical schedule assertions for all underlyings; reuse it for any future regressions on /api/instruments/expiries. Pre-existing failures in /app/backend/tests/test_backend.py TestFakeToken / TestSettings are unrelated to this iteration.",
+  "rca_of_issue": "Bug RCA (per request): (1) /app/backend/server.py _demo_expiries() previously ignored the `underlying` arg and emitted NIFTY-Tuesday weeklies + last-Thursday monthlies for every caller. Fix at lines 444-494 introduces per-underlying schedule (NIFTY/SENSEX weekly+monthly, indices/stocks monthly-only, MCX commodities calendar-day). (2) _live_expiries_from_master() filtered by underlying first then exchange, allowing NSE rows whose trading-symbol begins with 'SENSEX' to leak into BSE queries. Fix (per request description, not directly testable without a live token) reorders to filter by exchange aliases first with name-startswith fallback. Verified via /api/instruments/expiries (demo path) on deployed env: all 19 schedule assertions pass and NIFTY != SENSEX sets are confirmed."
+}

@@ -428,36 +428,69 @@ async def _demo_margin_payload(token: str) -> Dict[str, Any]:
     }
 
 
-def _demo_expiries() -> Dict[str, Any]:
-    """Return ~8 weekly + 4 monthly expiries.
+def _demo_expiries(underlying: str = "NIFTY") -> Dict[str, Any]:
+    """Return weekly + monthly expiries appropriate to the requested underlying.
 
-    NSE moved the NIFTY weekly expiry to Tuesdays in early 2025 (SEBI
-    rationalization). We model that here. The fallback works for any other
-    underlying too since the next Tuesday is always a valid choice in demo
-    mode.
+    Reflects the SEBI rationalisation (Nov 2024 onwards):
+      • One weekly per exchange — NSE keeps NIFTY (Tuesday), BSE keeps
+        SENSEX (Thursday). All other indices (BANKNIFTY, FINNIFTY,
+        MIDCPNIFTY, BANKEX) and all F&O stocks are monthly-only.
+      • F&O stocks + NSE monthly indices expire on the last Thursday of
+        the month; BSE indices (SENSEX/BANKEX monthlies) on the last
+        Tuesday.
+      • MCX commodities are monthly-only with a contract-specific
+        calendar day (e.g. GOLD on the 5th, CRUDEOIL on the 18th).
     """
+    u = (underlying or "").upper()
     today = datetime.now(timezone.utc).date()
-    # Days until the upcoming Tuesday (weekday == 1). 0 means today *is* Tue.
-    days_ahead = (1 - today.weekday()) % 7
     out: List[str] = []
-    # 8 Tuesday weeklies starting from this week's Tuesday (or today if Tue).
-    for w in range(8):
-        d = today + timedelta(days=days_ahead + 7 * w)
-        out.append(d.isoformat())
 
-    # 4 additional monthlies — last Tuesday of months further out.
+    # --- WEEKLY block (only NIFTY + SENSEX have weeklies) -----------------
+    weekly_weekday: Optional[int] = None  # 0=Mon … 6=Sun
+    if u == "NIFTY":
+        weekly_weekday = 1  # Tuesday
+    elif u == "SENSEX":
+        weekly_weekday = 3  # Thursday
+    if weekly_weekday is not None:
+        days_ahead = (weekly_weekday - today.weekday()) % 7
+        for w in range(8):
+            d = today + timedelta(days=days_ahead + 7 * w)
+            out.append(d.isoformat())
+
+    # --- MONTHLY block ----------------------------------------------------
     from calendar import monthrange
+
+    # MCX commodities — fixed calendar day per contract (approximate).
+    MCX_MONTH_DAY = {
+        "GOLD": 5, "GOLDM": 5, "GOLDGUINEA": 5, "GOLDPETAL": 5,
+        "SILVER": 5, "SILVERM": 28, "SILVERMIC": 28,
+        "CRUDEOIL": 18, "CRUDEOILM": 18,
+        "NATURALGAS": 25, "NATGASMINI": 25,
+        "COPPER": 28, "ZINC": 28, "LEAD": 28,
+        "NICKEL": 28, "ALUMINIUM": 28,
+        "COTTON": 28, "MENTHAOIL": 28, "CARDAMOM": 28,
+    }
+    # Default monthly weekday: last Thursday (NSE F&O stocks + NSE
+    # monthly indices). BSE monthly indices use last Tuesday.
+    monthly_weekday = 1 if u in ("SENSEX", "BANKEX") else 3
+
     base = today.replace(day=1)
-    for m in range(2, 6):
+    for m in range(0, 6):  # current + next 5 months
         year = base.year + (base.month - 1 + m) // 12
         month = (base.month - 1 + m) % 12 + 1
         last_day = monthrange(year, month)[1]
-        d = datetime(year, month, last_day).date()
-        while d.weekday() != 1:  # walk back to last Tuesday
-            d -= timedelta(days=1)
-        iso = d.isoformat()
-        if iso not in out:
-            out.append(iso)
+        if u in MCX_MONTH_DAY:
+            day = min(MCX_MONTH_DAY[u], last_day)
+            d = datetime(year, month, day).date()
+        else:
+            d = datetime(year, month, last_day).date()
+            while d.weekday() != monthly_weekday:
+                d -= timedelta(days=1)
+        if d >= today:
+            iso = d.isoformat()
+            if iso not in out:
+                out.append(iso)
+
     return {"expiries": sorted(set(out))}
 
 
@@ -1059,10 +1092,21 @@ def _live_expiries_from_master(token: str, underlying: str, exchange: str) -> Li
     try:
         u = underlying.upper()
         ex = exchange.upper()
+        # Groww's master historically uses `NSE`/`BSE` directly, but some
+        # vintages use the segment-tagged variants. Accept all of them so
+        # SENSEX (BSE) and GOLD (MCX) don't accidentally collide with NIFTY.
+        ex_aliases = {
+            "NSE": {"NSE", "NFO", "NSEFO", "NSE_FO", "NSE-FNO"},
+            "BSE": {"BSE", "BFO", "BSEFO", "BSE_FO", "BSE-FNO"},
+            "MCX": {"MCX", "MCXFO", "MCX_FO", "MCX-COMM", "COMM", "COMMODITY"},
+        }.get(ex, {ex})
+
         cols_lower = {c.lower(): c for c in df.columns}
         underlying_col = (
             cols_lower.get("underlying_symbol")
             or cols_lower.get("underlying")
+            or cols_lower.get("trading_symbol")
+            or cols_lower.get("symbol")
             or cols_lower.get("name")
         )
         type_col = (
@@ -1083,28 +1127,49 @@ def _live_expiries_from_master(token: str, underlying: str, exchange: str) -> Li
             )
             return []
 
-        # Filter by underlying first — match common variations.
-        sub = df[df[underlying_col].astype(str).str.upper().eq(u)]
+        # ── Exchange filter first ─────────────────────────────────────────
+        # Doing this BEFORE the underlying filter prevents an NSE row whose
+        # trading-symbol happens to start with "SENSEX" from polluting a
+        # BSE query (and vice-versa for MCX).
+        scope = df
+        if exch_col is not None:
+            scope_filtered = df[df[exch_col].astype(str).str.upper().isin(ex_aliases)]
+            if not scope_filtered.empty:
+                scope = scope_filtered
+            else:
+                logger.warning(
+                    "no rows for exchange=%s (aliases=%s) in column=%s; sample: %s",
+                    ex, ex_aliases, exch_col,
+                    df[exch_col].dropna().astype(str).unique()[:10].tolist(),
+                )
+
+        # ── Underlying filter ─────────────────────────────────────────────
+        # Strategy:
+        #   1. Exact match on the chosen underlying_col (cheap).
+        #   2. If that's empty AND the col is a name/symbol col, fall back
+        #      to a startswith() match — Groww's per-contract `name` is
+        #      "SENSEX25JUL76000CE" so startswith("SENSEX") catches it.
+        col_lower = underlying_col.lower()
+        upper_series = scope[underlying_col].astype(str).str.upper()
+        sub = scope[upper_series.eq(u)]
+        if sub.empty and col_lower in ("name", "symbol", "trading_symbol"):
+            sub = scope[upper_series.str.startswith(u)]
         if sub.empty:
             logger.warning(
-                "no rows for underlying=%s in column=%s; sample unique values: %s",
-                u, underlying_col, df[underlying_col].dropna().astype(str).unique()[:10].tolist(),
+                "no rows for underlying=%s in column=%s (exchange-scope=%d); sample: %s",
+                u, underlying_col, len(scope),
+                scope[underlying_col].dropna().astype(str).unique()[:10].tolist(),
             )
 
         # Apply option-only filter best-effort.
-        # Groww stores option type as `CE`/`PE` per leg, futures as `FUT`,
-        # indices as `IDX` (no `OPTIDX/OPTSTK`).
         if not sub.empty and type_col is not None:
             type_upper = sub[type_col].astype(str).str.upper()
-            opt_mask = type_upper.isin(["CE", "PE"])
+            # Groww stores option type as `CE`/`PE` per leg; some vintages
+            # tag instruments as OPTIDX/OPTSTK/OPTFUT instead.
+            opt_mask = type_upper.isin(["CE", "PE", "OPTIDX", "OPTSTK", "OPTFUT", "OPT"])
             sub_opt = sub[opt_mask]
             if not sub_opt.empty:
                 sub = sub_opt
-
-        if exch_col is not None and not sub.empty:
-            ex_filter = sub[sub[exch_col].astype(str).str.upper().eq(ex)]
-            if not ex_filter.empty:
-                sub = ex_filter
 
         raw = sub[expiry_col].dropna().astype(str).tolist()
         out: List[str] = []
@@ -1114,7 +1179,7 @@ def _live_expiries_from_master(token: str, underlying: str, exchange: str) -> Li
                 out.append(m.group(1))
                 continue
             # Fallback: try common alt formats like 12-Jun-2026 or 12-06-2026
-            for fmt in ("%d-%b-%Y", "%d-%m-%Y", "%Y%m%d"):
+            for fmt in ("%d-%b-%Y", "%d-%m-%Y", "%Y%m%d", "%d/%m/%Y"):
                 try:
                     d = datetime.strptime(s.split("T")[0], fmt).date()
                     out.append(d.isoformat())
@@ -1122,8 +1187,8 @@ def _live_expiries_from_master(token: str, underlying: str, exchange: str) -> Li
                 except Exception:  # noqa: BLE001
                     pass
         logger.info(
-            "master-scan underlying=%s exchange=%s underlying_col=%s expiry_col=%s type_col=%s rows=%d unique_expiries=%d",
-            u, ex, underlying_col, expiry_col, type_col, len(sub), len(set(out)),
+            "master-scan underlying=%s exchange=%s (aliases=%s) underlying_col=%s expiry_col=%s type_col=%s rows=%d unique_expiries=%d",
+            u, ex, ex_aliases, underlying_col, expiry_col, type_col, len(sub), len(set(out)),
         )
         return sorted(set(out))
     except Exception as exc:  # noqa: BLE001
@@ -1151,7 +1216,7 @@ async def instrument_master_debug(token: str = Depends(require_token)):
 @api.get("/instruments/expiries")
 async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(require_token)):
     if _is_demo(token):
-        return _demo_expiries()
+        return _demo_expiries(underlying)
     today_iso = datetime.now(timezone.utc).date().isoformat()
 
     # PRIMARY: scan the live instrument master (returns *future* expiries).
