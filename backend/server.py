@@ -988,6 +988,19 @@ FNO_STOCKS = [
 ]
 FNO_STOCK_ITEMS = [{"symbol": s, "name": s, "type": "STOCK", "exchange": "NSE"} for s in FNO_STOCKS]
 
+
+def _segment_for(exchange: str) -> str:
+    """Return the Groww segment constant matching a target exchange.
+
+    MCX commodity options live under SEGMENT_COMMODITY — NOT SEGMENT_FNO.
+    Hardcoding FNO everywhere caused option-chain lookups + order placement
+    to silently fail for every commodity (GOLD, SILVER, CRUDEOIL, etc.).
+    """
+    ex = (exchange or "").upper()
+    if ex == "MCX":
+        return GrowwAPI.SEGMENT_COMMODITY
+    return GrowwAPI.SEGMENT_FNO
+
 # MCX commodities universe — used for commodity option trading (Indian
 # Multi Commodity Exchange). Curated from the actively-traded list (Jun 2026).
 MCX_COMMODITIES = [
@@ -1610,7 +1623,7 @@ async def _arm_protective_order(
     sl_price, tp_price = levels["sl"], levels["tp"]
 
     common = dict(
-        segment=GrowwAPI.SEGMENT_FNO,
+        segment=_segment_for(exchange),
         trading_symbol=trading_symbol,
         exchange=exchange,
         quantity=int(quantity),
@@ -2130,25 +2143,49 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             pass
     contract_cost = float(pick.get("ltp") or 0) * lot_size
     # If we don't have a live LTP (e.g. master fallback and live quote also
-    # failed), we can't size safely — never use a placeholder LTP.
+    # failed — common on MCX where Groww's option-chain endpoint frequently
+    # returns "Underlying not found"), we can't size based on capital. For
+    # MARKET orders the user has already accepted the dry-run warning that
+    # quantity will be recomputed at placement time, so we default to a
+    # single lot (minimum exposure). For LIMIT we still hard-fail because
+    # the limit price calculation requires a known LTP.
     if contract_cost <= 0:
-        if payload.dry_run:
-            return {
-                "dry_run": True,
-                "preset": preset_doc,
-                "selected": pick,
-                "quantity": 0,
-                "lots": 0,
-                "lot_size": lot_size,
-                "estimated_cost": 0,
-                "spot": spot,
-                "fallback_reason": fallback_reason or "ltp_unavailable",
-            }
-        raise HTTPException(status_code=400, detail="No live LTP available for the picked strike — refusing to size.")
-    lots = math.floor(risk_capital / contract_cost) if contract_cost > 0 else 0
-    if practice_mode:
-        lots = 1
-    quantity = lots * lot_size
+        if preset_doc["order_type"] == "MARKET":
+            lots = 1
+            quantity = lots * lot_size
+            if payload.dry_run:
+                return {
+                    "dry_run": True,
+                    "preset": preset_doc,
+                    "selected": pick,
+                    "quantity": quantity,
+                    "lots": lots,
+                    "lot_size": lot_size,
+                    "estimated_cost": 0,
+                    "spot": spot,
+                    "fallback_reason": fallback_reason or "ltp_unavailable",
+                }
+            # Real MARKET order: fall through with lots=1. Groww will
+            # fill at whatever the live price is.
+        else:
+            if payload.dry_run:
+                return {
+                    "dry_run": True,
+                    "preset": preset_doc,
+                    "selected": pick,
+                    "quantity": 0,
+                    "lots": 0,
+                    "lot_size": lot_size,
+                    "estimated_cost": 0,
+                    "spot": spot,
+                    "fallback_reason": fallback_reason or "ltp_unavailable",
+                }
+            raise HTTPException(status_code=400, detail="No live LTP available for the picked strike — cannot size a LIMIT order.")
+    else:
+        lots = math.floor(risk_capital / contract_cost)
+        if practice_mode:
+            lots = 1
+        quantity = lots * lot_size
 
     # Refuse to size beyond capital. For dry-run we still render the preview
     # with qty=0 + a warning; for a real order we hard-fail.
@@ -2197,7 +2234,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         "order_type": GrowwAPI.ORDER_TYPE_LIMIT if order_type == "LIMIT" else GrowwAPI.ORDER_TYPE_MARKET,
         "product": GrowwAPI.PRODUCT_NRML,
         "quantity": quantity,
-        "segment": GrowwAPI.SEGMENT_FNO,
+        "segment": _segment_for(payload.exchange),
         "trading_symbol": pick["trading_symbol"],
         "transaction_type": GrowwAPI.TRANSACTION_TYPE_BUY,
         "order_reference_id": uuid.uuid4().hex[:18],

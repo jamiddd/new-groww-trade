@@ -1,0 +1,49 @@
+{
+  "summary": "Iter_16 — MCX commodity options fix verified. Created /app/backend/tests/test_mcx_commodity_fix.py with 13 focused tests (all PASS): (a) Static code checks confirm `_segment_for(exchange)` helper exists at /app/backend/server.py:992, branches MCX→SEGMENT_COMMODITY otherwise SEGMENT_FNO, is invoked in `_arm_protective_order` common dict (line 1626) and in `_dry_preview` order_payload['segment'] (line 2237). (b) Unit-import of `_segment_for` validates: 'MCX'→SEGMENT_COMMODITY, 'mcx'→SEGMENT_COMMODITY (case-insensitive), 'NSE'/'BSE'/''/None→SEGMENT_FNO. (c) LTP-unavailable relaxation verified in source: `if contract_cost<=0` AND preset.order_type=='MARKET' → `lots=1` (file line 2152-2155). LIMIT still hard-fails with 'No live LTP available…cannot size a LIMIT order'. (d) API behaviour: POST /api/orders/place-preset with DEMO token + {underlying:'GOLDM', exchange:'MCX', option_type:'PE', preset_key:'breakout_mkt'/'breakout_chaser_lmt', capital:50000, dry_run:true, expiry:'2026-06-26'} returns HTTP 200 with valid dry-run preview (selected.trading_symbol starts with 'GOLDM', lots/lot_size/quantity all valid). NOTE: demo path uses synthetic LTP (random 80–200) so it doesn't exercise the *real* MCX option-chain-empty branch — the fix lives in the non-demo `_dry_preview` path which can only be exercised end-to-end with a live Groww token. Verification of that branch is via static code checks (passing) + the unit test of `_segment_for`. (e) Regression: NSE/NIFTY MARKET & LIMIT dry-run with demo token still returns lots>=1 with proper quantity = lots * lot_size. (f) Fake-token POST /api/orders/place-preset for MCX/GOLDM returns clean JSON (no 500). Pre-existing test_backend.py has 5 unrelated failures (default settings drift on ask_max_loss_at_startup; fake-token endpoints now return graceful 200 fallbacks) — these are NOT regressions from this fix, they predate it.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/orders/exit (close-position flow)",
+        "issue": "place_order at server.py:2470 is hardcoded to GrowwAPI.SEGMENT_FNO when closing positions. Since get_positions_for_user at line 2417 also only queries SEGMENT_FNO, MCX commodity positions cannot be enumerated NOR closed via this endpoint. Out of scope for the current MCX option-buy fix, but worth tracking as a follow-up so users can exit MCX positions through the app once they're successfully placed."
+      },
+      {
+        "endpoint": "internal _candle_context_last_hour (server.py:1477)",
+        "issue": "get_historical_candle_data is called with hardcoded SEGMENT_FNO. For MCX symbols, the 9-EMA / time-in-range context fetch will likely fail or return empty, so the confirmation dialog won't show those indicators for commodities. Not blocking — context is best-effort and the dry-run response handles missing ctx — but worth a `_segment_for(exchange)` here too for symmetry."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mcx_commodity_fix.py",
+    "/app/test_reports/pytest/iter16_mcx_results.xml"
+  ],
+  "action_items": [
+    "Redeploy backend changes to the user's DigitalOcean droplet (/opt/scalpx) — the fix is verified locally but the user reported the bug on the LIVE app, so they need a redeploy to consume `_segment_for` + the lots=1 MARKET fallback.",
+    "Optional follow-up: extend `_segment_for(exchange)` to (a) the historical-candle call at server.py:1477 so MCX confirmation dialogs show 9-EMA/below-price-% indicators, and (b) the exit-positions flow at server.py:2417/2470 so users can close MCX commodity positions through the app (today the positions fetch only returns FNO positions, so MCX positions are invisible to the close-percent UI).",
+    "Either rename the user-facing preset keys in the request body (`breakout_call_mkt` / `breakout_chaser_call_lmt`) to match the actual DEFAULT_PRESETS keys (`breakout_mkt` / `breakout_chaser_lmt`) OR update DEFAULT_PRESETS — currently the task description used preset keys that don't exist, but the place-preset handler silently falls through with `preset_doc = {}` when an unknown key is supplied. Should return 404 (the non-demo path already does)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 2615 lines — well over the 700-line guideline. Worth splitting into routers/, services/, models/ modules.",
+    "Demo-mode shortcut for /api/orders/place-preset (server.py:1837-2049) is a fully duplicated implementation of the real flow with synthetic data — ~200 lines of near-duplicate sizing/SL-TP/sticky-price logic. The MCX fix had to be applied to one path; the demo path didn't need it because it synthesises LTP, but any future order-sizing change must remember to touch both. Consider extracting common sizing into a helper.",
+    "`_segment_for` defaults None to SEGMENT_FNO via `(exchange or '').upper()`. That's fine for the current call sites (which always supply an exchange string), but a defensive `if exchange is None: raise` would catch silent NSE-fallback bugs earlier."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mcx_commodity_fix.py (new)",
+    "/app/test_reports/pytest/iter16_mcx_results.xml (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 on new MCX suite; pre-existing test_backend.py has 5 unrelated failures from prior iterations)",
+    "frontend": "skipped per request (backend-only)"
+  },
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The MCX commodity fix is verified at the source-code level + via the demo-token API path. The real (non-demo) MCX path can only be end-to-end exercised with a live Groww token — testing agents cannot generate one (see /app/memory/test_credentials.md). Future agents working on MCX or position-close flows should look at the two minor follow-ups flagged above (server.py:1477 candle context, server.py:2417/2470 exit-positions). Reuse /app/backend/tests/test_mcx_commodity_fix.py as the regression baseline.",
+  "rca_of_issue": "Root cause: Groww SDK's `get_option_chain(...)` raises 'Underlying not found' for commodities because commodity options live under SEGMENT_COMMODITY, not SEGMENT_FNO — and the SDK's chain endpoint is FNO-only. Compound bug: even when our master-fallback picks a strike, the place_order call hardcoded segment=SEGMENT_FNO so Groww would reject the placement. Fix: (1) new `_segment_for(exchange)` helper at server.py:992 returning SEGMENT_COMMODITY for MCX else SEGMENT_FNO. (2) Applied in `_arm_protective_order` (line 1626 — protective OCO/GTT) and `_dry_preview` order_payload (line 2237 — main BUY placement). (3) Relaxed `contract_cost <= 0` dead-end in `_dry_preview`: for MARKET orders, default to lots=1 so the user sees a sane preview AND the real Groww place_order can fill at live price. LIMIT remains hard-fail since the limit price calculation requires a known LTP. Reproduction: with a real Groww token, POST /api/orders/place-preset {underlying:'GOLDM', exchange:'MCX', ...} — before fix: order_payload would have segment=SEGMENT_FNO + lots=0 → confirmation dialog disabled. After fix: segment=SEGMENT_COMMODITY + lots=1 (MARKET) → PLACE ORDER enabled. Mitigation: redeploy to the user's droplet."
+}
