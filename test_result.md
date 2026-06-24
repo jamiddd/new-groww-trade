@@ -101,3 +101,113 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Latency / 502 errors on the ScalpX backend after the Droplet redeploy. The user
+  reported underlyings, order history, and strike computation loading extremely
+  slowly. Root cause: serial Groww API calls + a large (50k-row) cold instrument
+  master fetch on every fresh container + repeated option-chain fetches during
+  dry-runs and strike previews.
+
+backend:
+  - task: "Parallelise /api/account/orders fan-out with asyncio.gather"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Verified previous-session edit landed: orders_history now fires no-segment + FNO + CASH + COMMODITY in parallel via asyncio.gather (lines ~925). Demo path responds in <100 ms."
+
+  - task: "Single-flight + disk-persisted instrument-master cache"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Wrapped _load_instruments in a threading.Lock so concurrent cold requests no longer trigger N parallel 50k-row downloads. Successful loads are pickled to /tmp/scalpx_instruments.pkl (6h TTL) and the FastAPI startup hook now warms the in-memory cache from that pickle. Added _load_instruments_async helper and switched the three async call sites (/instruments/underlyings, /instruments/master-debug, place_preset_order) to use it so the event loop never blocks on a cold CSV download."
+
+  - task: "Parallelise /api/instruments/expiries 2-year historical fallback"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "When the live instrument-master scan returns no expiries we now hit Groww's historical /get_expiries for (current_year, current_year+1) in parallel via asyncio.gather instead of serially."
+
+  - task: "Short-TTL single-flight cache around get_option_chain"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Introduced _get_option_chain_cached with a 2s TTL keyed on (exchange, underlying, expiry) and an asyncio.Lock per key. Both /instruments/option-chain and place_preset_order go through this wrapper, so back-to-back strike previews + dry-runs share one Groww round-trip and the existing 6s hard timeout is preserved. Demo expiries/underlyings curl responses verified."
+
+frontend:
+  - task: "Frontend latency UX (untouched in this pass)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/home.tsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "No frontend code changed this pass. Frontend continues to point at the Droplet IP via EXPO_PUBLIC_BACKEND_URL; speed-up is delivered server-side."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 22
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Single-flight + disk-persisted instrument-master cache"
+    - "Short-TTL single-flight cache around get_option_chain"
+    - "Parallelise /api/instruments/expiries 2-year historical fallback"
+    - "Parallelise /api/account/orders fan-out with asyncio.gather"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Performance pass on the Groww-facing FastAPI backend. Please test the
+      following in DEMO mode (token `DEMO__SCALPX__TOKEN` via `X-Groww-Token`
+      header) since the Droplet's live Groww auth can't be exercised from this
+      pod:
+
+      1. GET /api/instruments/underlyings?q=NIF — should return <500ms and
+         include NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY.
+      2. GET /api/instruments/expiries?underlying=NIFTY&exchange=NSE — should
+         return a sorted future-dated `expiries` array quickly.
+      3. GET /api/account/orders — demo order history must not 5xx and should
+         return within ~1s.
+      4. POST /api/orders/place-preset with `dry_run: true` against the demo
+         token (any preset key from DEFAULT_PRESETS) — confirm the dry-run
+         response includes a `pick` and basic sizing fields.
+      5. Burst-fire 5 concurrent GET /api/instruments/option-chain requests for
+         the same (NIFTY, nearest expiry, NSE) tuple — verify they all succeed
+         and (via logs) only one fan-out to Groww happens within the 2s TTL.
+
+      No real Groww credentials are needed — exercise demo mode only. Use
+      MONGO_URL from /app/backend/.env. Report any non-2xx responses, regressions
+      vs the existing behaviour, or sub-second→multi-second slowdowns.

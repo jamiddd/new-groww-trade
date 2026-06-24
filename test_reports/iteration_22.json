@@ -1,0 +1,44 @@
+{
+  "summary": "Backend perf/caching verification for iter22 single-flight + disk-pickle instrument cache, asyncio.gather expiries fallback, 2s-TTL option-chain cache, startup warm-up. 8/9 pytest cases PASS (~3.7s total). Verified: (a) /instruments/underlyings?q=NIF returns NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY with exchange=NSE in ~1ms (warm cache); SENSEX correctly tagged exchange=BSE on q=SEN; (b) /instruments/expiries?underlying=NIFTY&exchange=NSE returns a sorted, all-future-dated expiries array in demo mode; (c) /account/orders returns 200 with `orders` array, no 5xx; (d) /orders/place-preset dry_run with preset_key=steady_mkt against demo token returns the expected selected/strike/ltp/quantity/lots/lot_size/estimated_cost/preset fields; (e) Regression: /auth/server-ip returns JSON dict (200), /account/margin returns balance fields (200), /account/positions returns 200; (f) Burst of 5 concurrent /instruments/option-chain calls in demo mode does NOT block the event loop and the asyncio.Lock single-flights correctly (3.46s wall, ~0.3-0.5s gap between completions), proving the new _get_option_chain_cached wrapper is wired correctly. FAILURE: All 5 burst requests return 502 'Authentication failed. Your API token has either expired or is invalid.' because /api/instruments/option-chain at server.py:1333 has NO `_is_demo(token)` branch — contrary to the review-request claim that 'demo has its own demo option-chain handler'. The endpoint calls _groww_client(DEMO_TOKEN) → GrowwAPI rejects → 502. This is a pre-existing gap exposed by the burst test; it does NOT regress any iter22-introduced caching code (cache/single-flight works as designed).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/instruments/option-chain",
+        "issue": "No demo-mode branch. With X-Groww-Token: DEMO__SCALPX__TOKEN the endpoint forwards to live Groww and returns HTTP 502 'Authentication failed. Your API token has either expired or is invalid.' Reference: /app/backend/server.py:1333-1348. All other demo-aware endpoints (underlyings:1099, expiries:1294, margin:814, positions:941, orders:962, place-preset:1962) short-circuit on _is_demo(token) before _groww_client(); this one does not. Demo callers (and the burst test) all get 502 instead of a synthetic chain.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "_get_option_chain_cached",
+        "issue": "Failed upstream calls (HTTPException / TimeoutError) are not negatively cached. Under the lock, each waiter re-enters the upstream call serially. Observed wall time 3.46s for 5 concurrent 502s (~0.7s each). For a real outage this means a sustained burst keeps hammering Groww at ~1 req/sec per key instead of failing-fast for the 2s TTL window. Consider caching failures with a shorter TTL (e.g. 0.5s) or storing a sentinel so the lock-holder's result is shared. Reference: server.py:1373-1396."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter22_perf_caching.py",
+    "/app/test_reports/pytest/iter22_results.xml"
+  ],
+  "action_items": [
+    "Add a demo-mode branch at the top of /api/instruments/option-chain (server.py:1333) mirroring the pattern used in /instruments/expiries:1294 and /orders/place-preset:1962. It should return a synthetic option chain (e.g. derive ATM from the same atm_map in place_preset_order:1965-1976, build ±N strikes with random LTPs, OI, IV) so demo callers and the option-chain burst path don't 502. Without this fix the mobile app cannot exercise the option-chain UI in demo mode.",
+    "(Minor) In _get_option_chain_cached (server.py:1373), cache failures with a short negative TTL OR share the exception result across waiters under the lock so that a burst doesn't serially retry on outage. Not blocking — purely a robustness nice-to-have."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1333 /instruments/option-chain has no `if _is_demo(token): ...` short-circuit despite the review-request explicitly stating demo has its own handler. This is the root cause of the only failing test.",
+    "server.py:1389 only the success path writes to _OPTION_CHAIN_CACHE — error responses are not memoized, so under the lock each new waiter re-runs the upstream call. Single-flight still bounds wall time (concurrency=1) but does not implement back-off on failure.",
+    "server.py:1359-1360 _OPTION_CHAIN_CACHE and _OPTION_CHAIN_LOCKS use plain dicts mutated from async code. Reads/writes inside the same event-loop are safe by single-threaded cooperative scheduling, but the trim block at 1391-1395 runs while holding the per-key lock — fine — yet the global LRU sweep does pop other keys' locks which could race with another coroutine awaiting on that lock. Likelihood is very low (>64 distinct keys) but worth a comment or a more careful pop."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "88.9% (8/9)", "frontend": "skipped"},
+  "seed_data_creation": "None — used demo seed already present.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Re-run /app/backend/tests/test_iter22_perf_caching.py after the main agent adds a demo branch to /instruments/option-chain. The single FAIL is TestOptionChainBurst::test_burst_5_concurrent_demo and the assertion is `no 5xx in burst statuses`. The other 8 tests cover all the iter22 changes (underlyings cache, expiries gather+sort+future-filter, orders 200, place-preset dry_run shape, server-ip JSON, margin fields, positions 200) and should keep passing. Burst test already confirms the asyncio.Lock single-flight works (3.46s wall for 5 sequential ~0.7s upstream attempts, no event-loop starvation — other endpoints continued to serve during the burst). Demo token: DEMO__SCALPX__TOKEN. Backend at http://localhost:8001. Mongo from /app/backend/.env (DB_NAME=test_database). No frontend work was done this iteration per the review request (backend only).",
+  "rca_of_issue": "RCA for option-chain burst 502s: /api/instruments/option-chain (server.py:1333) is the lone authenticated GET in the instruments family that lacks a demo short-circuit. It unconditionally constructs GrowwAPI(token) via _groww_client(); with the synthetic DEMO__SCALPX__TOKEN the SDK's first authenticated call (get_option_chain) returns Groww's auth-failed 401, which the wrapper converts to a 502 via HTTPException(status_code=502, detail=str(exc)) at line 1347. The new 2s TTL + asyncio.Lock cache is working — observable as serial 0.3-0.5s gaps between concurrent completions — but because failed responses are not memoized, all 5 waiters still get 502 (consistently same body, so still 'consistent payloads'). Reproduction: `curl -H 'X-Groww-Token: DEMO__SCALPX__TOKEN' 'http://localhost:8001/api/instruments/option-chain?underlying=NIFTY&expiry=<future_iso>&exchange=NSE&option_type=CE'` → 502. Mitigation: add `if _is_demo(token): return _demo_option_chain(underlying, expiry, exchange, option_type)` at the top of the option_chain handler, where _demo_option_chain builds a chain around the same atm_map already used by place_preset_order in demo mode."
+}

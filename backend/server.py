@@ -15,8 +15,10 @@ import hashlib
 import logging
 import math
 import os
+import pickle
 import random
 import re
+import threading
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -56,25 +58,80 @@ db = mongo_client[os.environ["DB_NAME"]]
 # ---------------------------------------------------------------------------
 # Instrument-master cache
 # ---------------------------------------------------------------------------
-# Groww's get_all_instruments() returns a full CSV (~50 k rows). We cache it in
-# memory for an hour and reuse it across requests.
+# Groww's get_all_instruments() returns a full CSV (~50 k rows). We cache it
+# in memory for an hour, persist it to disk so warm restarts are instant,
+# and serialise the cold-load behind a lock so a burst of concurrent
+# requests doesn't trigger N parallel 50k-row downloads (which was a major
+# source of the 502s the user reported).
 _INSTRUMENTS_CACHE: Dict[str, Any] = {"loaded_at": 0.0, "df": None}
 _INSTRUMENTS_TTL = 60 * 60  # 1h
+_INSTRUMENTS_DISK_TTL = 6 * 60 * 60  # 6h — disk warm-start is "good enough"
+_INSTRUMENTS_DISK_PATH = Path("/tmp/scalpx_instruments.pkl")
+_INSTRUMENTS_LOCK = threading.Lock()
+
+
+def _instruments_load_from_disk() -> bool:
+    """Populate the in-memory cache from disk if a recent pickle exists.
+    Returns True if a usable snapshot was loaded."""
+    try:
+        if not _INSTRUMENTS_DISK_PATH.exists():
+            return False
+        age = time.time() - _INSTRUMENTS_DISK_PATH.stat().st_mtime
+        if age > _INSTRUMENTS_DISK_TTL:
+            return False
+        with _INSTRUMENTS_DISK_PATH.open("rb") as fh:
+            df = pickle.load(fh)
+        _INSTRUMENTS_CACHE["df"] = df
+        # treat as fresh in-memory for a fraction of the TTL so the next
+        # request still triggers a background refresh after a while.
+        _INSTRUMENTS_CACHE["loaded_at"] = time.time() - max(0, _INSTRUMENTS_TTL // 2)
+        logger.info("instruments: loaded %d rows from disk cache (age %ds)", len(df), int(age))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("instruments: disk cache load failed: %s", exc)
+        return False
+
+
+def _instruments_save_to_disk(df: Any) -> None:
+    try:
+        tmp = _INSTRUMENTS_DISK_PATH.with_suffix(".tmp")
+        with tmp.open("wb") as fh:
+            pickle.dump(df, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp.replace(_INSTRUMENTS_DISK_PATH)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("instruments: disk cache write failed: %s", exc)
 
 
 def _load_instruments(token: str):
     now = time.time()
     if _INSTRUMENTS_CACHE["df"] is not None and (now - _INSTRUMENTS_CACHE["loaded_at"]) < _INSTRUMENTS_TTL:
         return _INSTRUMENTS_CACHE["df"]
-    try:
-        api = GrowwAPI(token)
-        df = api.get_all_instruments()
-        _INSTRUMENTS_CACHE["df"] = df
-        _INSTRUMENTS_CACHE["loaded_at"] = now
+    # Single-flight: only one request triggers the cold load; concurrent
+    # requests block briefly and reuse the result.
+    with _INSTRUMENTS_LOCK:
+        now = time.time()
+        if _INSTRUMENTS_CACHE["df"] is not None and (now - _INSTRUMENTS_CACHE["loaded_at"]) < _INSTRUMENTS_TTL:
+            return _INSTRUMENTS_CACHE["df"]
+        try:
+            api = GrowwAPI(token)
+            df = api.get_all_instruments()
+            _INSTRUMENTS_CACHE["df"] = df
+            _INSTRUMENTS_CACHE["loaded_at"] = now
+            _instruments_save_to_disk(df)
+            logger.info("instruments: refreshed from Groww (%d rows)", len(df))
+            return df
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to load instruments: %s", exc)
+            return _INSTRUMENTS_CACHE["df"]  # may be None
+
+
+async def _load_instruments_async(token: str):
+    """Async-friendly variant — runs the (potentially slow) cold load in a
+    thread so the event loop stays responsive."""
+    df = _INSTRUMENTS_CACHE["df"]
+    if df is not None and (time.time() - _INSTRUMENTS_CACHE["loaded_at"]) < _INSTRUMENTS_TTL:
         return df
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to load instruments: %s", exc)
-        return _INSTRUMENTS_CACHE["df"]  # may be None
+    return await asyncio.to_thread(_load_instruments, token)
 
 
 # ---------------------------------------------------------------------------
@@ -1045,7 +1102,7 @@ async def underlyings(q: str = "", token: str = Depends(require_token)):
             qu = q.upper()
             results = [r for r in results if qu in r["symbol"].upper() or qu in r["name"].upper()]
         return {"items": results[:300]}
-    df = _load_instruments(token)
+    df = await _load_instruments_async(token)
     results: List[Dict[str, Any]] = list(INDEX_UNDERLYINGS)
     if df is not None:
         try:
@@ -1221,7 +1278,7 @@ async def instrument_master_debug(token: str = Depends(require_token)):
     of the cached instrument master so we can see Groww's actual schema."""
     if _is_demo(token):
         return {"demo": True}
-    df = _load_instruments(token)
+    df = await _load_instruments_async(token)
     if df is None:
         return {"error": "master not loaded"}
     sample = df.head(2).to_dict(orient="records")
@@ -1243,18 +1300,27 @@ async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(
     future = sorted({d for d in live if d >= today_iso})
 
     # FALLBACK: ask the historical endpoint (rare, but useful for FUTIDX-only
-    # underlyings or if the master CSV failed to load).
+    # underlyings or if the master CSV failed to load). Parallelize the
+    # current+next-year lookup so we don't wait on two serial round-trips.
     historical_errors: List[str] = []
     if not future:
         api_ = _groww_client(token)
         now = datetime.now(timezone.utc)
-        all_dates: List[str] = []
-        for year in (now.year, now.year + 1):
+        years = (now.year, now.year + 1)
+
+        async def _hist_for_year(year: int):
             try:
                 data = await _call_blocking(api_.get_expiries, exchange, underlying, year)
-                all_dates.extend(_extract_iso_dates(data))
+                return year, _extract_iso_dates(data), None
             except Exception as exc:  # noqa: BLE001
-                historical_errors.append(f"{year}: {exc}")
+                return year, [], str(exc)
+
+        results = await asyncio.gather(*(_hist_for_year(y) for y in years))
+        all_dates: List[str] = []
+        for year, dates, err in results:
+            all_dates.extend(dates)
+            if err:
+                historical_errors.append(f"{year}: {err}")
         future = sorted({d for d in all_dates if d >= today_iso})
 
     logger.info(
@@ -1274,10 +1340,60 @@ async def option_chain(
 ):
     api_ = _groww_client(token)
     try:
-        data = await _call_blocking(api_.get_option_chain, exchange, underlying, expiry)
+        data = await _get_option_chain_cached(api_, exchange, underlying, expiry)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Option chain fetch timed out — try again.") from None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return data
+
+
+# ---------------------------------------------------------------------------
+# Option-chain TTL cache + single-flight
+# ---------------------------------------------------------------------------
+# Strike previews, dry-runs, and the actual order placement often hit the
+# option chain back-to-back for the same (underlying, expiry, exchange).
+# We cache the raw response for a few seconds (still "live enough" for
+# scalping) AND single-flight concurrent fetches behind an asyncio.Lock
+# so a burst of clicks doesn't fan out into 4 Groww round-trips.
+_OPTION_CHAIN_CACHE: Dict[tuple, Dict[str, Any]] = {}
+_OPTION_CHAIN_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_OPTION_CHAIN_TTL_SECONDS = 2.0
+_OPTION_CHAIN_TIMEOUT = 6.0
+
+
+def _option_chain_lock(key: tuple) -> asyncio.Lock:
+    lock = _OPTION_CHAIN_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _OPTION_CHAIN_LOCKS[key] = lock
+    return lock
+
+
+async def _get_option_chain_cached(api_: GrowwAPI, exchange: str, underlying: str, expiry: str) -> Any:
+    """Hard-timeout, single-flight, short-TTL wrapper around get_option_chain."""
+    key = (exchange.upper(), underlying.upper(), expiry[:10])
+    entry = _OPTION_CHAIN_CACHE.get(key)
+    now = time.time()
+    if entry and (now - entry["ts"]) < _OPTION_CHAIN_TTL_SECONDS:
+        return entry["data"]
+    async with _option_chain_lock(key):
+        entry = _OPTION_CHAIN_CACHE.get(key)
+        now = time.time()
+        if entry and (now - entry["ts"]) < _OPTION_CHAIN_TTL_SECONDS:
+            return entry["data"]
+        data = await asyncio.wait_for(
+            _call_blocking(api_.get_option_chain, exchange, underlying, expiry),
+            timeout=_OPTION_CHAIN_TIMEOUT,
+        )
+        _OPTION_CHAIN_CACHE[key] = {"ts": time.time(), "data": data}
+        # Trim cache to avoid unbounded growth (~unlikely but cheap insurance)
+        if len(_OPTION_CHAIN_CACHE) > 64:
+            oldest = sorted(_OPTION_CHAIN_CACHE.items(), key=lambda kv: kv[1]["ts"])[: len(_OPTION_CHAIN_CACHE) - 64]
+            for k, _ in oldest:
+                _OPTION_CHAIN_CACHE.pop(k, None)
+                _OPTION_CHAIN_LOCKS.pop(k, None)
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -2075,9 +2191,9 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         # Groww's server frequently hangs before returning the "Underlying
         # not found" error. Without this cap the whole dry-run can exceed
         # the Cloudflare edge timeout (100s) and the user sees a 520.
-        chain_raw = await asyncio.wait_for(
-            _call_blocking(api_.get_option_chain, payload.exchange, payload.underlying, payload.expiry),
-            timeout=6.0,
+        # The cached wrapper also single-flights bursts of dry-runs.
+        chain_raw = await _get_option_chain_cached(
+            api_, payload.exchange, payload.underlying, payload.expiry
         )
     except asyncio.TimeoutError:
         chain_error = "option_chain_timeout"
@@ -2155,7 +2271,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     # exchange-mandated quantity. SENSEX in particular was getting 75
     # (NIFTY's old size) when the master lookup didn't hit cleanly.
     lot_size = _lot_size_for(payload.underlying, fallback=1)
-    df = _load_instruments(token)
+    df = await _load_instruments_async(token)
     if df is not None:
         try:
             row = df[df["trading_symbol"].astype(str) == pick["trading_symbol"]]
@@ -2675,6 +2791,15 @@ async def seed_defaults():
     existing_settings = await db.settings.find_one({"_id": "user"})
     if not existing_settings:
         await db.settings.insert_one({"_id": "user", **Settings().model_dump()})
+
+    # Pre-warm the instrument-master cache from disk so the very first
+    # /instruments/* request doesn't pay the cold-load tax (~5-10s on the
+    # Droplet's slow link to Groww). The disk snapshot is refreshed
+    # on-demand inside _load_instruments when stale.
+    try:
+        await asyncio.to_thread(_instruments_load_from_disk)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("instruments: disk pre-warm failed: %s", exc)
 
 
 @app.on_event("shutdown")
