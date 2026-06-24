@@ -138,6 +138,11 @@ class Settings(BaseModel):
     save_last_underlying: bool = True
     last_underlying: Optional[str] = None
     last_underlying_expiry: Optional[str] = None  # YYYY-MM-DD
+    # When True, the app ignores any sticky expiry and always selects
+    # the closest (earliest future) expiry on launch and on every
+    # underlying change. The user can still tap to switch within a
+    # session — but the next reload/underlying-change resets to nearest.
+    always_nearest_expiry: bool = False
     # Practice mode: every BUY uses exactly 1 lot regardless of the preset's
     # position-sizing %. Lets the user test the flow with minimal capital risk.
     practice_mode: bool = False

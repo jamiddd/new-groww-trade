@@ -12,12 +12,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
 import { api, AppSettings, disconnect } from "@/src/api/client";
+import { storage } from "@/src/utils/storage";
 import { Colors, FONT } from "@/src/theme";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
+
+const ALWAYS_NEAREST_EXPIRY_KEY = "always_nearest_expiry";
 
 export default function SettingsScreen() {
   const router = useRouter();
   const [s, setS] = useState<AppSettings | null>(null);
+  const [alwaysNearestExpiry, setAlwaysNearestExpiry] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -25,7 +29,12 @@ export default function SettingsScreen() {
   useEffect(() => {
     (async () => {
       try {
-        setS(await api.settings());
+        const [settings, nearestStored] = await Promise.all([
+          api.settings(),
+          storage.getItem<boolean>(ALWAYS_NEAREST_EXPIRY_KEY, false as boolean),
+        ]);
+        setS(settings);
+        setAlwaysNearestExpiry(!!nearestStored);
       } catch (e: any) {
         setError(e?.message ?? "Failed to load settings");
       } finally {
@@ -96,6 +105,16 @@ export default function SettingsScreen() {
           value={s.save_last_underlying}
           onChange={(v) => update({ save_last_underlying: v })}
           testID="setting-save-underlying"
+        />
+        <SettingRow
+          title="Always set next closest expiry"
+          desc="Ignore the sticky expiry and auto-select the earliest upcoming expiry on launch and whenever you switch underlyings."
+          value={alwaysNearestExpiry}
+          onChange={async (v) => {
+            setAlwaysNearestExpiry(v);
+            await storage.setItem(ALWAYS_NEAREST_EXPIRY_KEY, v);
+          }}
+          testID="setting-always-nearest-expiry"
         />
         <SettingRow
           title="Practice mode"

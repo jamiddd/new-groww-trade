@@ -96,6 +96,11 @@ export default function Home() {
 
   const [maxLoss, setMaxLoss] = useState<number>(40000);
   const [actionsCollapsed, setActionsCollapsed] = useState<boolean>(false);
+  // Local (device-only) preference. When True the home screen ignores
+  // any sticky `last_underlying_expiry` and always auto-selects the
+  // first item in the (ascending-sorted) future-expiries list — i.e.
+  // the next closest expiry — on launch and on every underlying switch.
+  const [alwaysNearestExpiry, setAlwaysNearestExpiry] = useState<boolean>(false);
 
   // Modals
   const [searchVisible, setSearchVisible] = useState(false);
@@ -118,15 +123,24 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const [s, fx] = await Promise.all([api.settings(), api.fxInrUsd()]);
+        const [s, fx, nearestStored] = await Promise.all([
+          api.settings(),
+          api.fxInrUsd(),
+          storage.getItem<boolean>("always_nearest_expiry", false as boolean),
+        ]);
         setSettings(s);
+        const wantNearest = !!nearestStored;
+        setAlwaysNearestExpiry(wantNearest);
         if (fx?.rate) setUsdRate(fx.rate);
         if (s.save_last_underlying && s.last_underlying) {
           // Check expiry not stale
           const expOk = !s.last_underlying_expiry || new Date(s.last_underlying_expiry) >= new Date();
           if (expOk) {
             setUnderlying(s.last_underlying);
-            if (s.last_underlying_expiry) setExpiry(s.last_underlying_expiry);
+            // When "Always next closest expiry" is on we deliberately
+            // SKIP restoring the sticky expiry — loadExpiries() will
+            // pick exp[0] (the nearest) once the list arrives.
+            if (!wantNearest && s.last_underlying_expiry) setExpiry(s.last_underlying_expiry);
           }
         }
         if (s.ask_max_loss_at_startup) {
@@ -161,13 +175,18 @@ export default function Home() {
         .filter((d) => typeof d === "string" && d >= todayIso)
         .sort();
       setExpiryList(exp);
-      // Reset the selected expiry if the previous one is no longer valid
-      // (e.g., it expired, or the schedule changed).
-      setExpiry((cur) => (cur && exp.includes(cur) ? cur : exp[0] ?? null));
+      // When "Always next closest expiry" is on, force exp[0] regardless
+      // of any prior selection. Otherwise: preserve the current pick if
+      // it is still valid (e.g. user manually chose a later expiry).
+      if (alwaysNearestExpiry) {
+        setExpiry(exp[0] ?? null);
+      } else {
+        setExpiry((cur) => (cur && exp.includes(cur) ? cur : exp[0] ?? null));
+      }
     } catch {
       setExpiryList([]);
     }
-  }, []);
+  }, [alwaysNearestExpiry]);
 
   const loadAll = useCallback(async () => {
     setError(null);
@@ -477,7 +496,10 @@ export default function Home() {
   const onPickExpiry = async (exp: string) => {
     setExpiry(exp);
     setExpirySheetVisible(false);
-    if (settings?.save_last_underlying) {
+    // Only persist when "Save last underlying" is on AND
+    // "Always next closest expiry" is off — otherwise the sticky
+    // would silently override the auto-pick on next launch.
+    if (settings?.save_last_underlying && !alwaysNearestExpiry) {
       const newSettings = { ...settings, last_underlying: underlying, last_underlying_expiry: exp } as AppSettings;
       setSettings(newSettings);
       try {

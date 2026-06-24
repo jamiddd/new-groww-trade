@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 6 — frontend-only verification of the new 'Always set next closest expiry' setting (testID `setting-always-nearest-expiry`). All acceptance criteria PASS on both viewports (390x844 iPhone, 412x915 Pixel): (1) the SettingRow is present and visible with exact title 'Always set next closest expiry' and description 'Ignore the sticky expiry and auto-select the earliest upcoming expiry on launch and whenever you switch underlyings.' — the required phrase 'earliest upcoming expiry' is present. (2) The Switch defaults to OFF on a fresh load. (3) Toggling ON then reloading /settings shows the switch STILL ON — AsyncStorage (IndexedDB-backed on web) persistence works end-to-end. (4) Home-screen behaviour was verified via code inspection per the agent_to_agent_context_note (auth-gated /api/expiries returns empty in the web preview without a real Groww token): home.tsx:126-144 reads `always_nearest_expiry` from storage in the bootstrap effect and explicitly SKIPS restoring `s.last_underlying_expiry` when wantNearest is true; loadExpiries (home.tsx:164-189) forces `setExpiry(exp[0] ?? null)` when alwaysNearestExpiry is true, otherwise preserves the current pick; onPickExpiry (home.tsx:496-509) only calls `api.updateSettings` when `settings?.save_last_underlying && !alwaysNearestExpiry`, correctly making session-only picks non-sticky when the new toggle is on. No new react-native deprecation warnings were introduced; the pre-existing `shadow*` -> `boxShadow` web warning from prior iterations is unchanged.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "react-native-web shadow* style props (pre-existing, unchanged)",
+        "issue": "Console emits `\"shadow*\" style props are deprecated. Use \"boxShadow\".` from styles in home.tsx (sheetSurface, menuPanel, expiryPopover). Not introduced by this iteration's change. Reference: /app/frontend/app/home.tsx:1327-1330, 1429-1431, 1494-1497."
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_6.json"],
+  "action_items": [
+    "No fixes required for this feature — all five acceptance criteria pass.",
+    "(Optional, unchanged) Migrate remaining `shadow*` style props in home.tsx to `boxShadow` to silence the react-native-web deprecation warning."
+  ],
+  "critical_code_review_comments": [
+    "home.tsx line 184 — `setExpiry((cur) => (cur && exp.includes(cur) ? cur : exp[0] ?? null))` is the only branch that calls loadExpiries-time updateSettings indirectly via the (cur && exp.includes(cur)) preservation path. Since onPickExpiry already correctly skips persistence when alwaysNearestExpiry is true, this is consistent. Good.",
+    "home.tsx line 502 — the guard `settings?.save_last_underlying && !alwaysNearestExpiry` is exactly the spec; matches the intended 'session-only' override semantics.",
+    "settings.tsx — AsyncStorage write happens *after* the optimistic React state update (line 114-115). If the storage write fails the UI still shows ON; storage.setItem is best-effort, which is acceptable for a device-local preference and matches the existing pattern in the file."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped per request", "frontend": "100% — settings toggle present/labelled/off-by-default/persistent on 390x844 and 412x915; home-screen behaviour confirmed via code inspection per E1's note"},
+  "seed_data_creation": "No seeding required. The /api/settings endpoint returned 200 with default values in the web preview, so the SettingsScreen rendered without needing an auth token.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Observed behaviour: settings-screen renders without auth (api.settings is unauthenticated and returns defaults). The new toggle uses the same SettingRow component as the other rows; the only differentiator is that its onChange path writes to local storage under key `always_nearest_expiry` rather than calling api.updateSettings. The web preview's IndexedDB-backed AsyncStorage object store is `AsyncStorage` inside DB `AsyncStorage`, not the older `RKStorage/catalystLocalStorage` shape (the IDB probe in this run hit `One of the specified object stores was not found.` for the older name — harmless; the persistence-via-reload test is the authoritative check and it passed). The auth-protected /api/instruments/expiries means a real expiry-popover pill-selection round trip can only be tested with a logged-in Groww session; rely on code inspection of home.tsx lines 164-189 and 496-509 for that part of the spec.",
+  "rca_of_issue": "N/A — feature works as specified."
+}
