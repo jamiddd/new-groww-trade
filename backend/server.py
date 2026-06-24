@@ -2065,7 +2065,22 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     chain_raw: Any = None
     chain_error: Optional[str] = None
     try:
-        chain_raw = await _call_blocking(api_.get_option_chain, payload.exchange, payload.underlying, payload.expiry)
+        # Hard 6-second timeout on get_option_chain — for MCX commodities
+        # Groww's server frequently hangs before returning the "Underlying
+        # not found" error. Without this cap the whole dry-run can exceed
+        # the Cloudflare edge timeout (100s) and the user sees a 520.
+        chain_raw = await asyncio.wait_for(
+            _call_blocking(api_.get_option_chain, payload.exchange, payload.underlying, payload.expiry),
+            timeout=6.0,
+        )
+    except asyncio.TimeoutError:
+        chain_error = "option_chain_timeout"
+        logger.warning(
+            "Option chain fetch timed out (>6s) for %s/%s/%s — falling through to master-scan fallback",
+            payload.exchange, payload.underlying, payload.expiry,
+        )
+        if not payload.dry_run:
+            raise HTTPException(status_code=504, detail="Option chain fetch timed out — try again or use the MARKET preset.") from None
     except Exception as exc:  # noqa: BLE001
         chain_error = str(exc)
         logger.warning("Option chain fetch failed: %s", exc)
@@ -2303,7 +2318,28 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
 
     logger.info("placing order: %s", order_payload)
     try:
-        resp = await _call_blocking(api_.place_order, **order_payload)
+        # Hard 25-second timeout on the live order placement. If Groww
+        # hangs (we've seen rare cases on MCX LIMIT trades), we return
+        # a clean 504 so the user sees a friendly toast instead of a
+        # Cloudflare 520. NOTE: a TimeoutError here doesn't mean the
+        # order didn't go through — it just means we didn't get the
+        # confirmation in time. The user should check their order book.
+        resp = await asyncio.wait_for(
+            _call_blocking(api_.place_order, **order_payload),
+            timeout=25.0,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Order placement TIMED OUT (>25s) for %s. User should verify order book.",
+            order_payload.get("trading_symbol"),
+        )
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Order placement timed out after 25s. Check your Groww order book — "
+                "the order MAY have been placed. If not, please retry."
+            ),
+        ) from None
     except Exception as exc:  # noqa: BLE001
         msg = str(exc)
         logger.exception("Order placement failed for %s: %s", order_payload.get("trading_symbol"), exc)
