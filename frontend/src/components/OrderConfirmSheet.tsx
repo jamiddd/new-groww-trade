@@ -299,24 +299,29 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   loadingBlock: { paddingVertical: 24, alignItems: "center", gap: 8 },
   loadingText: { fontFamily: FONT, color: Colors.textSecondary, fontSize: 13 },
   warnBox: {
-    backgroundColor: "#FEF3C7",
+    // Semi-transparent amber tint — readable on both light + dark surfaces.
+    backgroundColor: "rgba(245, 158, 11, 0.15)",
     borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#F59E0B",
     padding: 10,
     marginTop: 12,
   },
-  warnText: { fontFamily: FONT, color: "#92400E", fontSize: 12, lineHeight: 17 },
+  warnText: { fontFamily: FONT, color: "#F59E0B", fontSize: 12, lineHeight: 17, fontWeight: "600" },
   card: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: Colors.pillBg,
     borderRadius: 10,
     padding: 12,
     marginTop: 12,
     gap: 6,
   },
   heroPriceBlock: {
-    backgroundColor: "#EAF1FF",
+    // Tinted primary block that adapts to both themes (uses the primary
+    // hue at low alpha rather than a hardcoded pastel).
+    backgroundColor: "rgba(26,77,255,0.10)",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#C6D6F5",
+    borderColor: "rgba(26,77,255,0.30)",
     padding: 16,
     marginTop: 14,
     alignItems: "center",

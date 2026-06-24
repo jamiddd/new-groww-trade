@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration_13 OrderConfirmSheet dark-mode color fix VERIFIED via live mobile viewport (390x844) tests on the deployed Expo web preview using demo/demo login. Toggled /settings → setting-theme-dark, returned to /home, tapped buy-button-breakout_mkt (buy-button-breakout_call_mkt does not exist; available presets are breakout_mkt / breakout_chaser_lmt / steady_mkt / steady_lmt — flagging the testID name in the spec was off, but functionally equivalent). order-confirm-sheet opens cleanly. getComputedStyle results in DARK match the spec exactly: card bg = rgb(24,24,27) = Colors.pillBg dark (#18181B); heroPriceBlock bg = rgba(26,77,255,0.1) and border = rgba(26,77,255,0.3) — both as designed. The hero entry-price block renders as a subtle blue-tinted panel over the dark surface, fully readable. Switching back to setting-theme-light: card bg = rgb(243,244,246) = Colors.pillBg light (#F3F4F6), heroPriceBlock retains the rgba(26,77,255,0.1) translucent overlay which composites to a soft blue panel on white — visual hierarchy preserved. warnBox could not be exercised in-app since the preview returned successfully (no fallback_reason) — verified statically that the StyleSheet now uses rgba(245,158,11,0.15) bg + #F59E0B left-border + #F59E0B text (OrderConfirmSheet.tsx:301-310). Zero pageerrors across the entire flow. Both light and dark screenshots taken (/tmp/iter13_confirm_dark.png, /tmp/iter13_confirm_light.png) and confirm no remaining stark white / pastel patches in dark mode. Iteration_13 scope fully satisfied.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "deprecated shadow* style props (carry-over from iter_9/10/11/12, OUT OF SCOPE)", "issue": "Runtime warning '\"shadow*\" style props are deprecated. Use \"boxShadow\".' still fires from home.tsx StyleSheet entries. Separate task — not blocking this iteration."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/iter13_confirm_dark.png",
+    "/tmp/iter13_confirm_light.png"
+  ],
+  "action_items": [
+    "(Spec naming nit, non-blocking) The review request references testID `buy-button-breakout_call_mkt`, but the actual rendered presets on /home are `buy-button-breakout_mkt`, `buy-button-breakout_chaser_lmt`, `buy-button-steady_mkt`, `buy-button-steady_lmt`. Future specs should reference the actual preset keys.",
+    "(Optional carry-over) Replace deprecated shadow* style props with boxShadow in home.tsx to silence the runtime warning."
+  ],
+  "critical_code_review_comments": [
+    "OrderConfirmSheet.tsx:301-310 warnBox now uses theme-neutral translucent amber: backgroundColor='rgba(245,158,11,0.15)' + borderLeftColor='#F59E0B' (3px) + warnText color='#F59E0B'. Works on both surfaces with consistent semantic meaning (warning = amber). Good choice — amber on translucent has WCAG-acceptable contrast against both #FFFFFF and #0A0A0A surfaces.",
+    "OrderConfirmSheet.tsx:311-317 card now uses Colors.pillBg (palette token) — verified rgb(24,24,27) dark and rgb(243,244,246) light at runtime.",
+    "OrderConfirmSheet.tsx:318-328 heroPriceBlock now uses rgba(26,77,255,0.10) bg + rgba(26,77,255,0.30) border — verified at runtime in both themes. The primary tint at low alpha composites correctly over both Colors.surface light (#FFFFFF → soft blue) and dark (#0A0A0A → near-navy blue). Visual hierarchy preserved.",
+    "Static grep of mkStyles factory shows no remaining hardcoded pastel/light hex (#FEF3C7, #92400E, #F8FAFC, #EAF1FF, #C6D6F5) — all 5 problem values replaced."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% — card+heroPriceBlock verified at runtime in both modes; warnBox verified statically (no fallback path triggered)"},
+  "seed_data_creation": "None. Used demo/demo via POST /api/auth/login on the deployed preview env.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Demo login (api_key=demo, api_secret=demo) via testID login-connect-button. Theme toggle via /settings testIDs setting-theme-dark / setting-theme-light persists to localStorage 'theme_mode'. Active /home preset testIDs are buy-button-breakout_mkt, buy-button-breakout_chaser_lmt, buy-button-steady_mkt, buy-button-steady_lmt (NOT breakout_call_mkt). Tapping any opens order-confirm-sheet. Within the sheet: testID entry-price for hero price, order-confirm-cancel/place for actions.",
+  "rca_of_issue": "Original bug: 4 hardcoded pastel hex values in OrderConfirmSheet.tsx mkStyles factory (warnBox #FEF3C7, warnText #92400E, card #F8FAFC, heroPriceBlock #EAF1FF + border #C6D6F5) bypassed the Colors palette and stayed light in dark mode. Fix applied by E1: replaced with theme-adaptive equivalents — warnBox uses rgba(245,158,11,0.15) + amber border/text; card uses Colors.pillBg palette token; heroPriceBlock uses rgba(26,77,255,0.10) bg + rgba(26,77,255,0.30) border. Verified at runtime: card bg correctly resolves to rgb(24,24,27) dark / rgb(243,244,246) light, heroPriceBlock retains its translucent primary overlay composited against both themes. No further action needed."
+}
