@@ -1,0 +1,27 @@
+{
+  "summary": "Static config verification only (frontend-only, no live UI testing per main-agent note about HTTPS-preview → HTTP-droplet Mixed Content). All 3 requested checks PASS: (1) /app/frontend/.env has exactly EXPO_PUBLIC_BACKEND_URL=http://168.144.86.71 with no quotes/trailing slash, and EXPO_PACKAGER_PROXY_URL + EXPO_PACKAGER_HOSTNAME still point to https://quick-trade-73.preview.emergentagent.com (untouched). (2) grep across /app/frontend/src and /app/frontend/app for backend URL references shows only process.env.EXPO_PUBLIC_BACKEND_URL in src/api/client.ts:6 and app/login.tsx:69 — no hardcoded http://168.144.86.71 or preview.emergentagent.com URLs leak into source. The single other URL hit (src/hooks/use-icon-fonts.ts:40) is a jsdelivr CDN for vector-icons fonts, unrelated to backend. (3) `sudo supervisorctl status expo` returns RUNNING (pid 19721, uptime ~1m — recently restarted, consistent with the fix). Bundle will be re-generated with the new EXPO_PUBLIC_BACKEND_URL on next phone connect.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "User must shake Expo Go on phone → Reload to force Metro to re-bundle with the new EXPO_PUBLIC_BACKEND_URL=http://168.144.86.71. Without this, the cached JS bundle on the device still points to the old preview pod URL.",
+    "Web preview at localhost:3000 will NOT be able to reach the backend (HTTPS preview → HTTP droplet = Mixed Content blocked by browser). This is expected and only phone-via-Expo-Go works for now. Consider provisioning a Let's Encrypt cert / domain for the droplet so the web preview path also works.",
+    "Once the user confirms order placement works on the phone, consider adding a startup health probe in app/login.tsx that logs the resolved BASE so future regressions of this kind are visible from device logs immediately."
+  ],
+  "critical_code_review_comments": [
+    "src/api/client.ts:6 silently falls back to '' if EXPO_PUBLIC_BACKEND_URL is missing — this leads to fetch('/api/...') against the bundler origin and a confusing 404 instead of a loud config error. Consider throwing at module-load in dev when the env is empty.",
+    "app/login.tsx:67 derives defaultIp from URL(raw).hostname only when it matches /^\\d+\\.\\d+\\.\\d+\\.\\d+$/. That's fine today (droplet is bare IP) but will silently break when the droplet gets a domain — the IP-whitelist chip will go blank until /api/auth/server-ip succeeds. Minor."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped", "frontend": "100% (3/3 static checks)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "This iteration was a static-config sanity check after an .env regression — no live UI/API testing was performed because the droplet backend is HTTP-only and the web preview is HTTPS (mixed-content blocked). The real validation is the user reloading Expo Go on their phone and re-attempting a NIFTY/MCX order against http://168.144.86.71; if it still returns 'unregistered IP', the issue is on the droplet side (wrong IP whitelisted on groww.in, or the droplet is egressing from a different IP than its public one) — not in this repo. /app/frontend/.env currently contains: EXPO_TUNNEL_SUBDOMAIN=quick-trade-73, EXPO_PACKAGER_HOSTNAME=https://quick-trade-73.preview.emergentagent.com, EXPO_PUBLIC_BACKEND_URL=http://168.144.86.71, EXPO_USE_FAST_RESOLVER=\"1\", METRO_CACHE_ROOT=/app/frontend/.metro-cache, EXPO_PACKAGER_PROXY_URL=https://quick-trade-73.preview.emergentagent.com.",
+  "rca_of_issue": "RCA: /app/frontend/.env had been previously reset (likely by an env-restore tool) so EXPO_PUBLIC_BACKEND_URL pointed at the Emergent preview pod (https://quick-trade-73.preview.emergentagent.com) whose egress IP rotates and is NOT whitelisted on Groww. The mobile app dutifully forwarded order POSTs to that pod's /api/orders/place-preset, the pod forwarded to Groww, Groww returned 403 'Request from unregistered IP address'. Mitigation: rewrite .env so the phone hits the user's own droplet (168.144.86.71 — already whitelisted on groww.in), restart Expo so Metro picks up the new public env on next bundle. Reproduction steps: (a) set EXPO_PUBLIC_BACKEND_URL to any non-whitelisted host, (b) reload Expo Go, (c) attempt a live order → 403 unregistered IP. Verification on phone (out of scope for this agent): shake → Reload, then place a small NIFTY order → should now succeed or fail with a non-IP-related Groww error."
+}
