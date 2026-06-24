@@ -1418,6 +1418,32 @@ def _round_tick(price: float) -> float:
     return round(round(price * 20.0) / 20.0, 2)
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Index option lot sizes (effective January 2026 per NSE Circular
+# NSE/FAOP/70616 and corresponding BSE updates). Used as a fallback
+# when Groww's instrument-master CSV lookup misses or returns 0, and
+# as the canonical source in demo mode.
+# Keys are uppercase underlying tickers.
+# ──────────────────────────────────────────────────────────────────────
+INDEX_LOT_SIZES_2026: Dict[str, int] = {
+    "NIFTY": 65,         # was 75 in 2025
+    "BANKNIFTY": 30,     # was 35
+    "FINNIFTY": 60,      # was 65
+    "MIDCPNIFTY": 120,   # was 140
+    "NIFTYNXT50": 25,    # unchanged
+    "SENSEX": 20,        # BSE
+    "BANKEX": 30,        # BSE
+}
+
+
+def _lot_size_for(underlying: str, fallback: int = 1) -> int:
+    """Look up the post-Jan-2026 lot size by underlying ticker. Strips
+    whitespace + uppercases so 'sensex' or 'Sensex' resolves the same."""
+    if not underlying:
+        return fallback
+    return INDEX_LOT_SIZES_2026.get(underlying.strip().upper(), fallback)
+
+
 def _is_zero_dte(expiry_str: str) -> bool:
     """True if `expiry_str` (YYYY-MM-DD) is TODAY in Indian Standard Time.
     Falls back to UTC date if zoneinfo isn't available."""
@@ -1721,7 +1747,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         strike = atm + strike_off if payload.option_type == "CE" else atm - strike_off
         fake_symbol = f"{u}{strike}{payload.option_type}"
         ltp = round(random.uniform(80, 200), 2)
-        lot = 75 if u == "NIFTY" else (35 if u == "BANKNIFTY" else 50)
+        lot = _lot_size_for(u, fallback=50)
         contract_cost = ltp * lot
         lots = math.floor((payload.capital * sizing) / contract_cost) if contract_cost > 0 else 0
         if practice_mode:
@@ -1982,13 +2008,19 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     # 3. Compute quantity from capital * sizing
     sizing = float(preset_doc["position_sizing_pct"]) / 100.0
     risk_capital = max(0.0, payload.capital) * sizing
-    lot_size = 1
+    # Prime lot_size with the post-Jan-2026 fallback so a CSV miss (or a
+    # stale row from Groww's instrument master) still gives the right
+    # exchange-mandated quantity. SENSEX in particular was getting 75
+    # (NIFTY's old size) when the master lookup didn't hit cleanly.
+    lot_size = _lot_size_for(payload.underlying, fallback=1)
     df = _load_instruments(token)
     if df is not None:
         try:
             row = df[df["trading_symbol"].astype(str) == pick["trading_symbol"]]
             if not row.empty and "lot_size" in row.columns:
-                lot_size = int(row.iloc[0]["lot_size"]) or 1
+                csv_lot = int(row.iloc[0]["lot_size"]) or 0
+                if csv_lot > 0:
+                    lot_size = csv_lot
         except Exception:  # noqa: BLE001
             pass
     contract_cost = float(pick.get("ltp") or 0) * lot_size
