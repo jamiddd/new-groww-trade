@@ -252,6 +252,8 @@ function Row({
   testID?: string;
   disabled?: boolean;
 }) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <TouchableOpacity
       style={[styles.row, disabled && { opacity: 0.45 }]}
@@ -286,6 +288,8 @@ function ListPicker({
   onPick: (v: string) => void;
   onClose: () => void;
 }) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <BottomSheet visible={visible} onClose={onClose} testID={`picker-${title}`}>
       <Text style={styles.sheetTitle}>{title}</Text>
@@ -321,6 +325,8 @@ function NumberPicker({
   onClose: () => void;
   onSave: (v: number) => void;
 }) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <BottomSheet visible={visible} onClose={onClose} avoidKeyboard testID={`number-picker-${title}`}>
       <Text style={styles.sheetTitle}>{title}</Text>
@@ -330,6 +336,8 @@ function NumberPicker({
         onChangeText={onChange}
         keyboardType="decimal-pad"
         autoFocus
+        placeholderTextColor={Colors.textMuted}
+        selectionColor={Colors.primary}
         testID="number-picker-input"
       />
       <TouchableOpacity
@@ -365,6 +373,8 @@ function RiskPicker({
   onClose: () => void;
   onSave: (sl: number, tp: number) => void;
 }) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <BottomSheet visible={visible} onClose={onClose} avoidKeyboard testID="risk-picker">
       <Text style={styles.sheetTitle}>Risk Management</Text>
@@ -380,6 +390,8 @@ function RiskPicker({
         onChangeText={onChangeSl}
         keyboardType="decimal-pad"
         autoFocus
+        placeholderTextColor={Colors.textMuted}
+        selectionColor={Colors.primary}
         testID="risk-picker-sl-input"
       />
 
@@ -389,6 +401,8 @@ function RiskPicker({
         value={tp}
         onChangeText={onChangeTp}
         keyboardType="decimal-pad"
+        placeholderTextColor={Colors.textMuted}
+        selectionColor={Colors.primary}
         testID="risk-picker-tp-input"
       />
 

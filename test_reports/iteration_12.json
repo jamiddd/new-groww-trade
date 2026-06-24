@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration_12 'styles is not defined' regression fix VERIFIED in BOTH light and dark mode on the deployed Expo web preview (mobile viewport 390x844, demo/demo login). Zero pageerrors across every interaction. OrderConfirmSheet (tap buy-button-breakout_mkt) opens cleanly in LIGHT and DARK mode — the Row helper at OrderConfirmSheet.tsx:267 now self-consumes useTheme() + useMemo(mkStyles), no ReferenceError. Preset screen pickers (preset.tsx Row L240, ListPicker L274, NumberPicker L313, RiskPicker L359) all render correctly in dark mode via row-strike / row-size / row-risk taps. Computed style measurements in DARK mode (theme_mode='dark', preset-screen bg = rgb(0,0,0)): ListPicker option text = rgb(243,244,246) = Colors.text dark (#F3F4F6); NumberPicker input text = rgb(243,244,246); RiskPicker sl-input = rgb(243,244,246); RiskPicker tp-input = rgb(243,244,246) — all confirm `color: Colors.text` is honored. UnderlyingSearchSheet input bg in DARK = rgb(24,24,27) = Colors.pillBg dark (#18181B) — no stark white. Login screen DARK: API key input color = rgb(243,244,246) on bg = rgb(10,10,10) = Colors.surface dark, typed text 'TEST123' fully visible. Light-mode equivalents also verified (input text = rgb(0,0,0)). Zero 'styles is not defined' or ReferenceError anywhere in the user-facing surface. Tests covered all 4 spec items end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "deprecated shadow* style props (carry-over from iter_9/iter_10/iter_11, NOT in scope of iter_12)", "issue": "Runtime warning '\"shadow*\" style props are deprecated. Use \"boxShadow\".' still fires from home.tsx StyleSheet entries (sheetSurface, menuPanel, toast, expiryPopover) using shadowColor/shadowOpacity/shadowRadius/shadowOffset. Separate task — not blocking this iteration."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/iter12_login.png",
+    "/tmp/iter12_home2.png",
+    "/tmp/iter12_confirm_light.png",
+    "/tmp/iter12_confirm_dark.png",
+    "/tmp/iter12_underlying_dark.png",
+    "/tmp/iter12_preset_dark2.png",
+    "/tmp/iter12_riskpicker_dark.png",
+    "/tmp/iter12_listpicker.png",
+    "/tmp/iter12_numpicker.png",
+    "/tmp/iter12_login_dark2.png",
+    "/tmp/iter12_final_check.png"
+  ],
+  "action_items": [
+    "(Optional, carry-over) Replace deprecated `shadow*` style props with `boxShadow` in home.tsx to silence the runtime warning. Unrelated to this iteration."
+  ],
+  "critical_code_review_comments": [
+    "OrderConfirmSheet.tsx:267-294 Row helper now correctly calls `const { Colors } = useTheme();` + `const styles = useMemo(() => mkStyles(Colors), [Colors]);` — closes over its own theme state, no longer depends on module-scope `styles`. Same pattern correctly applied to preset.tsx Row (L240), ListPicker (L274), NumberPicker (L313), RiskPicker (L359). Pattern is idiomatic and re-runs only when Colors object identity changes.",
+    "UnderlyingSearchSheet.tsx:130 `backgroundColor: Colors.pillBg` confirmed via getComputedStyle = rgb(24,24,27) in dark and rgb(243,244,246) in light — proper palette tokenization.",
+    "preset.tsx:340,394,405 `selectionColor={Colors.primary}` correctly added to NumberPicker + RiskPicker TextInputs alongside the existing placeholderTextColor={Colors.textMuted}.",
+    "Static grep of all four files for `'#FFFFFF'|'#FFF'` inside mkStyles factories returns no surface-color literals — only legitimate non-themed hex usage (e.g. heroPriceBlock warning palette, saveText 'FFF' on a primary-color button which is intentional).",
+    "ZERO `pageerror` events fired across all tested flows (OrderConfirmSheet x2, preset pickers x3 in dark, UnderlyingSearchSheet, login dark). The previous iter_9 ReferenceError regression class is fully resolved."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% — all 4 spec items pass in light and dark"},
+  "seed_data_creation": "None. Used demo/demo via POST /api/auth/login on the deployed preview env.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Demo login (api_key=demo, api_secret=demo) → /home works. Theme toggle via /settings → setting-theme-dark / setting-theme-light persists to localStorage 'theme_mode'. Preset rows in /preset?key=breakout_mkt are row-strike (ListPicker), row-iv, row-size (NumberPicker), row-risk (RiskPicker), row-order. Long-press a buy-button-* on /home navigates to /preset?key=... All BottomSheet-based pickers correctly themable via mkStyles factory. iteration_12 scope fully verified — no remaining issues.",
+  "rca_of_issue": "Root cause (already fixed by main agent): the iter_9 mkStyles refactor moved `styles` from module scope to component scope via `useMemo(() => mkStyles(Colors), [Colors])`. Sub-components declared OUTSIDE the parent component (OrderConfirmSheet's Row at L267; preset.tsx's Row L240, ListPicker L274, NumberPicker L313, RiskPicker L359) could not close over the component-scoped `styles` — any reference threw `ReferenceError: styles is not defined`. The user hit this when tapping a buy preset, which opens OrderConfirmSheet whose body renders multiple Row helpers. Mitigation applied by E1: each sub-component now self-consumes useTheme() + useMemo(mkStyles(Colors)). T1 verified via live runtime tests (zero pageerrors, correct rgb values in computed styles, all interactive flows render correctly in both light and dark mode)."
+}

@@ -275,6 +275,8 @@ function Row({
   bold?: boolean;
   valueColor?: string;
 }) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <View style={styles.kvRow}>
       <Text style={styles.kvLabel}>{label}</Text>

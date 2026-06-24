@@ -127,7 +127,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: Colors.text,
-    backgroundColor: "#FAFAFA",
+    backgroundColor: Colors.pillBg,
   },
   row: {
     paddingHorizontal: 16,
