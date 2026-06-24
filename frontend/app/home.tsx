@@ -15,7 +15,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import Animated, { FadeInDown, FadeOutDown, runOnJS } from "react-native-reanimated";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api, disconnect, AppSettings } from "@/src/api/client";
@@ -276,6 +281,23 @@ export default function Home() {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   };
+
+  // Pixel-perfect height animation for the actions panel body. We render
+  // the body once (offscreen on first paint) to measure its natural
+  // height, then animate the clip-container's height between 0 ↔
+  // measuredHeight whenever the collapse state changes. No opacity / fade
+  // — strictly translate the layout.
+  const bodyHeight = useSharedValue(0);
+  const expandProgress = useSharedValue(actionsCollapsed ? 0 : 1);
+
+  useEffect(() => {
+    expandProgress.value = withTiming(actionsCollapsed ? 0 : 1, { duration: 240 });
+  }, [actionsCollapsed, expandProgress]);
+
+  const animatedBodyClipStyle = useAnimatedStyle(() => ({
+    height: bodyHeight.value > 0 ? bodyHeight.value * expandProgress.value : undefined,
+    overflow: "hidden",
+  }));
 
   // Single source of truth for collapse-toggling — used by both the
   // tap-on-header path AND the swipe-pan path. Centralising it means
@@ -684,11 +706,18 @@ export default function Home() {
             </View>
           </GestureDetector>
 
-          {!actionsCollapsed ? (
-            <Animated.View
-              testID="actions-body"
-              entering={FadeInDown.duration(220)}
-              exiting={FadeOutDown.duration(180)}
+          {/* Body container is ALWAYS mounted (so we can measure its
+              natural height once via onLayout) and clipped to an
+              animated height. Animating just the clip height gives a
+              pure pixel-by-pixel slide with zero opacity / fade. */}
+          <Animated.View style={animatedBodyClipStyle} testID="actions-body">
+            <View
+              onLayout={(e) => {
+                const h = e.nativeEvent.layout.height;
+                if (h > 0 && Math.abs(bodyHeight.value - h) > 1) {
+                  bodyHeight.value = h;
+                }
+              }}
               style={styles.sheetBody}
             >
               <View style={styles.footerTop}>
@@ -758,8 +787,8 @@ export default function Home() {
               >
                 <Text style={styles.exitText}>EXIT ALL POSITIONS</Text>
               </TouchableOpacity>
-            </Animated.View>
-          ) : null}
+            </View>
+          </Animated.View>
         </View>
       </SafeAreaView>
 
