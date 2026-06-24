@@ -277,6 +277,33 @@ export default function Home() {
     setTimeout(() => setToast(null), 2500);
   };
 
+  // Single source of truth for collapse-toggling — used by both the
+  // tap-on-header path AND the swipe-pan path. Centralising it means
+  // `runOnJS` only ever sees a stable JS-callable function reference,
+  // which is required to avoid a native crash on Android when the
+  // worklet finishes.
+  const setActionsCollapsedPersistent = useCallback((next: boolean) => {
+    setActionsCollapsed(next);
+    storage.setItem("actions_collapsed", next);
+  }, []);
+
+  // Memoise the gesture so a new instance isn't constructed on every
+  // render (which would invalidate the native handler registration and
+  // could intermittently swallow events).
+  const actionsPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-12, 12])
+        .onEnd((e) => {
+          if (e.translationY < -20 || e.velocityY < -500) {
+            runOnJS(setActionsCollapsedPersistent)(false);
+          } else if (e.translationY > 20 || e.velocityY > 500) {
+            runOnJS(setActionsCollapsedPersistent)(true);
+          }
+        }),
+    [setActionsCollapsedPersistent],
+  );
+
   // Live LTP refresh inside the open confirmation dialog: every 3 s, while
   // a preset is queued for confirmation and we're not actively placing the
   // order, re-run the dry-run so the displayed LTP / LIMIT-price / SL / TP
@@ -632,33 +659,11 @@ export default function Home() {
       {/* Sticky footer with controls */}
       <SafeAreaView edges={["bottom"]} style={styles.footerWrap}>
         <View style={styles.footer}>
-          {/*
-            Swipe-to-toggle: drag the ACTIONS header up to expand the
-            panel, drag down to collapse. Tap on the header still works
-            for users who prefer the chevron. activeOffsetY: [-12, 12]
-            keeps the gesture from competing with the scroll view above.
-          */}
-          <GestureDetector
-            gesture={Gesture.Pan()
-              .activeOffsetY([-12, 12])
-              .onEnd((e) => {
-                if (e.translationY < -20 || e.velocityY < -500) {
-                  runOnJS(setActionsCollapsed)(false);
-                  runOnJS(storage.setItem)("actions_collapsed", false);
-                } else if (e.translationY > 20 || e.velocityY > 500) {
-                  runOnJS(setActionsCollapsed)(true);
-                  runOnJS(storage.setItem)("actions_collapsed", true);
-                }
-              })}
-          >
-            <Animated.View>
+          <GestureDetector gesture={actionsPanGesture}>
+            <View>
               <TouchableOpacity
                 style={styles.actionsHeader}
-                onPress={() => {
-                  const next = !actionsCollapsed;
-                  setActionsCollapsed(next);
-                  storage.setItem("actions_collapsed", next);
-                }}
+                onPress={() => setActionsCollapsedPersistent(!actionsCollapsed)}
                 testID="actions-toggle"
                 activeOpacity={0.7}
               >
@@ -676,7 +681,7 @@ export default function Home() {
               color={Colors.textSecondary}
             />
               </TouchableOpacity>
-            </Animated.View>
+            </View>
           </GestureDetector>
 
           {!actionsCollapsed ? (
