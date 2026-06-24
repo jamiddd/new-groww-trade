@@ -11,6 +11,7 @@ import {
   Pressable,
   Switch,
   TextInput,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -70,6 +71,15 @@ const formatUSD = (n: number, rate: number) =>
 
 export default function Home() {
   const router = useRouter();
+  const { width: vw, height: vh } = useWindowDimensions();
+
+  // Viewport-driven sizing for the buy/exit buttons. Cleaner than CSS
+  // media queries — we just clamp into reasonable touch-target bounds.
+  // Reference design (iPhone 14 Pro) ≈ 390 × 844.
+  const buyBtnHeight = Math.max(56, Math.min(96, Math.round(vh * 0.085)));
+  const exitBtnHeight = Math.max(44, Math.min(72, Math.round(vh * 0.066)));
+  const buyTextSize = Math.max(11, Math.min(15, Math.round(vw * 0.034)));
+  const exitTextSize = Math.max(10, Math.min(14, Math.round(vw * 0.032)));
 
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -773,13 +783,23 @@ export default function Home() {
                   return (
                     <TouchableOpacity
                       key={p.key}
-                      style={[styles.buyBtn, { backgroundColor: isLmt ? Colors.primaryDark : Colors.primary }]}
+                      style={[
+                        styles.buyBtn,
+                        { backgroundColor: isLmt ? Colors.primaryDark : Colors.primary, height: buyBtnHeight },
+                      ]}
                       onPress={() => onPresetPress(p)}
                       onLongPress={() => router.push(`/preset?key=${p.key}`)}
                       delayLongPress={400}
                       testID={`buy-button-${p.key}`}
                     >
-                      <Text style={styles.buyText}>{dynamicLabel}</Text>
+                      <Text
+                        style={[styles.buyText, { fontSize: buyTextSize }]}
+                        numberOfLines={2}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                      >
+                        {dynamicLabel}
+                      </Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -787,26 +807,26 @@ export default function Home() {
 
               <View style={styles.exitRow}>
                 <TouchableOpacity
-                  style={[styles.exitBtn, styles.exitPartial]}
+                  style={[styles.exitBtn, styles.exitPartial, { height: exitBtnHeight }]}
                   onPress={() => onExitPress(25)}
                   testID="exit-25-button"
                 >
-                  <Text style={styles.exitText}>EXIT 25% POSITIONS</Text>
+                  <Text style={[styles.exitText, { fontSize: exitTextSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>EXIT 25% POSITIONS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.exitBtn, styles.exitPartial]}
+                  style={[styles.exitBtn, styles.exitPartial, { height: exitBtnHeight }]}
                   onPress={() => onExitPress(50)}
                   testID="exit-50-button"
                 >
-                  <Text style={styles.exitText}>EXIT 50% POSITIONS</Text>
+                  <Text style={[styles.exitText, { fontSize: exitTextSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>EXIT 50% POSITIONS</Text>
                 </TouchableOpacity>
               </View>
               <TouchableOpacity
-                style={[styles.exitBtn, styles.exitAll]}
+                style={[styles.exitBtn, styles.exitAll, { height: exitBtnHeight }]}
                 onPress={() => onExitPress(100)}
                 testID="exit-all-button"
               >
-                <Text style={styles.exitText}>EXIT ALL POSITIONS</Text>
+                <Text style={[styles.exitText, { fontSize: exitTextSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>EXIT ALL POSITIONS</Text>
               </TouchableOpacity>
             </View>
           </Animated.View>
@@ -1263,21 +1283,18 @@ const styles = StyleSheet.create({
   buyBtn: {
     // Robust 2-column layout: flexBasis seeds each button at ~48% of the
     // row, flexGrow lets it stretch to consume the remaining 4 px gap.
-    // No more "49.4% + 4 px > 100% → wraps to single column" surprise on
-    // iPhone preview / smaller widths.
+    // Height is set inline from a viewport-driven value in the component.
     flexBasis: "48%",
     flexGrow: 1,
-    height: 70,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 8,
     borderRadius: 2,
   },
-  buyText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", textAlign: "center", fontSize: 12, letterSpacing: 0.6 },
+  buyText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", textAlign: "center", letterSpacing: 0.6 },
   exitRow: { flexDirection: "row", gap: 4, marginTop: 4 },
   exitBtn: {
     flex: 1,
-    height: 56,
     borderRadius: 2,
     alignItems: "center",
     justifyContent: "center",
