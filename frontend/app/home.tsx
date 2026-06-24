@@ -15,7 +15,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
+import Animated, { FadeInDown, FadeOutDown, runOnJS } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api, disconnect, AppSettings } from "@/src/api/client";
 import { Colors, FONT } from "@/src/theme";
@@ -631,17 +632,37 @@ export default function Home() {
       {/* Sticky footer with controls */}
       <SafeAreaView edges={["bottom"]} style={styles.footerWrap}>
         <View style={styles.footer}>
-          <TouchableOpacity
-            style={styles.actionsHeader}
-            onPress={() => {
-              const next = !actionsCollapsed;
-              setActionsCollapsed(next);
-              storage.setItem("actions_collapsed", next);
-            }}
-            testID="actions-toggle"
-            activeOpacity={0.7}
+          {/*
+            Swipe-to-toggle: drag the ACTIONS header up to expand the
+            panel, drag down to collapse. Tap on the header still works
+            for users who prefer the chevron. activeOffsetY: [-12, 12]
+            keeps the gesture from competing with the scroll view above.
+          */}
+          <GestureDetector
+            gesture={Gesture.Pan()
+              .activeOffsetY([-12, 12])
+              .onEnd((e) => {
+                if (e.translationY < -20 || e.velocityY < -500) {
+                  runOnJS(setActionsCollapsed)(false);
+                  runOnJS(storage.setItem)("actions_collapsed", false);
+                } else if (e.translationY > 20 || e.velocityY > 500) {
+                  runOnJS(setActionsCollapsed)(true);
+                  runOnJS(storage.setItem)("actions_collapsed", true);
+                }
+              })}
           >
-            <Text style={styles.actionsHeaderLabel}>ACTIONS</Text>
+            <Animated.View>
+              <TouchableOpacity
+                style={styles.actionsHeader}
+                onPress={() => {
+                  const next = !actionsCollapsed;
+                  setActionsCollapsed(next);
+                  storage.setItem("actions_collapsed", next);
+                }}
+                testID="actions-toggle"
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionsHeaderLabel}>ACTIONS</Text>
             {settings?.practice_mode ? (
               <View style={styles.practiceBadge} testID="practice-mode-badge">
                 <Feather name="shield" size={9} color="#FFFFFF" />
@@ -654,7 +675,9 @@ export default function Home() {
               size={18}
               color={Colors.textSecondary}
             />
-          </TouchableOpacity>
+              </TouchableOpacity>
+            </Animated.View>
+          </GestureDetector>
 
           {!actionsCollapsed ? (
             <Animated.View
