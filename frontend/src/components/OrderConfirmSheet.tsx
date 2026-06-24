@@ -23,6 +23,8 @@ export type OrderPreview = {
   } | null;
   /** Helper context: % of last hour the option's close traded below the current LTP. */
   below_price_pct?: { pct: number; samples: number } | null;
+  /** 9-period EMA on 1-min candles for the last hour. diff_pct = (LTP - EMA)/EMA × 100. */
+  ema9?: { value: number; diff_pct: number; samples: number } | null;
 };
 
 type Props = {
@@ -144,6 +146,27 @@ export default function OrderConfirmSheet({
                       {ctx.pct}%
                     </Text>{" "}
                     of last hour
+                  </Text>
+                ) : null}
+                {preview.ema9 ? (
+                  <Text style={styles.heroPriceCtx} testID="ema9-line">
+                    {preview.ema9.diff_pct >= 0 ? "Above" : "Below"} 9 EMA (
+                    {formatMoney(preview.ema9.value)}) by{" "}
+                    <Text
+                      style={{
+                        // EMA dip = potential pullback entry = green-ish
+                        // (we're long-biased). EMA extension = chasing = red.
+                        color:
+                          preview.ema9.diff_pct >= 1.5
+                            ? Colors.pnlNegative
+                            : preview.ema9.diff_pct <= -1.5
+                            ? Colors.pnlPositive
+                            : Colors.textSecondary,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {Math.abs(preview.ema9.diff_pct).toFixed(2)}%
+                    </Text>
                   </Text>
                 ) : null}
               </View>

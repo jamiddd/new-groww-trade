@@ -1318,24 +1318,32 @@ async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) 
     return 0.0
 
 
-async def _below_price_pct_last_hour(
+async def _candle_context_last_hour(
     api_: GrowwAPI,
     *,
     trading_symbol: str,
     exchange: str,
     current_price: float,
-) -> Optional[Dict[str, Any]]:
-    """How much of the last hour has this option traded BELOW the current
-    price? Returns {"pct": int 0..100, "samples": int} or None on failure.
+) -> Dict[str, Optional[Any]]:
+    """Fetch the last hour of 1-minute candles ONCE and derive two helper
+    signals for the confirmation dialog:
 
-    A high value (e.g. 80%) means the price has spent most of the hour
-    cheaper than right now → likely chasing a spike. A low value (e.g. 20%)
-    means we're near the bottom of the recent range → potentially a better
-    entry. Surfaced as a one-line "context" helper in the confirm dialog
-    so the user can sense-check the timing before pressing BUY.
+      1. below_pct  — what % of those candles closed BELOW the current
+                      price. Tells the user where they are in the recent
+                      range (low = near recent low → likely better entry).
+
+      2. ema9       — 9-period exponential moving average of the closes,
+                      plus the % difference between the current price and
+                      EMA(9). Positive % means we're trading ABOVE the EMA
+                      (bullish), negative means BELOW (bearish/oversold).
+
+    Returns {"below_pct": {...} | None, "ema9": {...} | None}. Returns
+    `None` for any leg that can't be computed (history fetch failed, too
+    few candles, etc.) so callers can selectively render.
     """
+    out: Dict[str, Optional[Any]] = {"below_pct": None, "ema9": None}
     if current_price <= 0 or not trading_symbol:
-        return None
+        return out
     try:
         from zoneinfo import ZoneInfo
         now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -1355,33 +1363,52 @@ async def _below_price_pct_last_hour(
         )
     except Exception as exc:  # noqa: BLE001
         logger.info("historical candle fetch failed (%s): %s", trading_symbol, exc)
-        return None
+        return out
 
-    # Groww may return {"candles": [[ts, o, h, l, c, v], ...]} or a flat list.
     candles: List[Any] = []
     if isinstance(resp, dict):
         candles = resp.get("candles") or resp.get("data") or []
     elif isinstance(resp, list):
         candles = resp
     if not candles:
-        return None
+        return out
 
+    # Extract closes in chronological order. Each row is [ts, o, h, l, c, v].
+    closes: List[float] = []
     below = 0
-    total = 0
     for row in candles:
-        # Each row is typically [ts, open, high, low, close, volume]
         if not isinstance(row, (list, tuple)) or len(row) < 5:
             continue
         try:
             close = float(row[4])
         except (TypeError, ValueError):
             continue
-        total += 1
+        closes.append(close)
         if close < current_price:
             below += 1
+
+    total = len(closes)
     if total == 0:
-        return None
-    return {"pct": round(below * 100 / total), "samples": total}
+        return out
+
+    out["below_pct"] = {"pct": round(below * 100 / total), "samples": total}
+
+    # 9-period EMA. Need at least 9 samples for the seed SMA. Standard
+    # formula: α = 2/(N+1); EMA[i] = close[i]*α + EMA[i-1]*(1-α). Seeded
+    # with the simple mean of the first 9 closes — same convention every
+    # charting library uses (TradingView, Stockcharts, etc.).
+    if total >= 9:
+        alpha = 2.0 / (9 + 1)
+        ema = sum(closes[:9]) / 9.0
+        for c in closes[9:]:
+            ema = c * alpha + ema * (1 - alpha)
+        diff_pct = ((current_price - ema) / ema) * 100 if ema > 0 else 0.0
+        out["ema9"] = {
+            "value": round(ema, 2),
+            "diff_pct": round(diff_pct, 2),
+            "samples": total,
+        }
+    return out
 
 
 def _round_tick(price: float) -> float:
@@ -1765,6 +1792,11 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                     "pct": random.randint(30, 75),
                     "samples": 60,
                 },
+                "ema9": {
+                    "value": round(ltp * random.uniform(0.97, 1.03), 2),
+                    "diff_pct": round(random.uniform(-3.5, 3.5), 2),
+                    "samples": 60,
+                },
             }
 
         doc = await _demo_state_for(token)
@@ -2045,9 +2077,9 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             float(preset_doc.get("stop_loss_pct") or 0),
             float(preset_doc.get("take_profit_pct") or 0),
         )
-        # Time-in-range context — only fetched on dry-run (the user is
-        # idling on the confirmation dialog, latency is fine here).
-        below_ctx = await _below_price_pct_last_hour(
+        # Time-in-range + 9 EMA context — only fetched on dry-run (the
+        # user is idling on the confirmation dialog, latency is fine here).
+        ctx = await _candle_context_last_hour(
             api_,
             trading_symbol=pick["trading_symbol"],
             exchange=payload.exchange,
@@ -2071,7 +2103,8 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 "sl_pct": float(preset_doc.get("stop_loss_pct") or 0),
                 "tp_pct": float(preset_doc.get("take_profit_pct") or 0),
             },
-            "below_price_pct": below_ctx,
+            "below_price_pct": ctx.get("below_pct"),
+            "ema9": ctx.get("ema9"),
         }
 
     logger.info("placing order: %s", order_payload)
