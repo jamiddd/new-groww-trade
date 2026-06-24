@@ -84,7 +84,7 @@ export default function OrderConfirmSheet({
   const sheetContentHeight = Math.round(vh * 0.8) - 56;
 
   return (
-    <BottomSheet visible={visible} onClose={onCancel} testID="order-confirm-sheet">
+    <BottomSheet visible={visible} onClose={onCancel} draggable={false} testID="order-confirm-sheet">
       <View style={[styles.sheetContainer, { height: sheetContentHeight }]}>
         <ScrollView
           style={styles.scrollArea}

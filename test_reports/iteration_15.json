@@ -1,0 +1,33 @@
+{
+  "summary": "Iter_15 — Verified the `draggable={false}` fix on OrderConfirmSheet end-to-end via live mobile Playwright (390x844) against the deployed Expo web preview with demo/demo login. All 5 review-request items PASS. (1) Grabber pill ABSENT in order-confirm-sheet: walked all descendants of [data-testid=order-confirm-sheet] looking for any 40x4 element — `grabberCandidatesInSheet: []`. Sheet rect = {x:0, y:208, w:390, h:636}; only one child in BottomSheet parent and it is the testID'd sheet itself. (2) Inner ScrollView fully bidirectionally scrollable WITHOUT moving the sheet: scrollHeight=687 > clientHeight=562; scrollTop went 0 → 125 (scroll-to-bottom) → 0 (scroll-to-top), and sheet.getBoundingClientRect().y stayed pinned at 208 throughout — confirming the parent Animated.View transform never moved (no pan handler intercepting). (3) Simulated swipe-DOWN gesture (mouse-down at sheet center-top, 10×20px drag = 200px total, then release): sheet remained visible and y stayed at 208 — `draggable={false}` correctly skipped the GestureDetector wrap entirely. (4) Regression on draggable sheets: opened max-loss-sheet via testID `max-loss-pill` on /home; grabber pill confirmed PRESENT (40×4, borderRadius:2px) and a downward swipe (15×30px drag = 450px) successfully closed the sheet (`max-loss-sheet dismissed via swipe-down: True`) — default `draggable={true}` behaviour intact for other consumers. (5) Sticky-footer regression from iter_14: `order-confirm-cancel` testID present and tapping it dismissed the sheet (`AFTER CANCEL — sheet gone: True`). Code review of BottomSheet.tsx confirms the conditional render is clean: when draggable=false the entire `<GestureDetector gesture={pan}>` wrap is skipped AND the `<View style={styles.grabber}/>` is omitted, matching the spec exactly. Deprecated shadow*/pointerEvents warnings persist from prior iterations (out of scope).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "deprecated shadow* style props (home.tsx, carry-over)", "issue": "Runtime warning '\"shadow*\" style props are deprecated. Use \"boxShadow\".' continues to fire on /home — flagged since iter_9, out of scope for this iter."},
+      {"component": "deprecated props.pointerEvents (carry-over)", "issue": "Runtime warning 'props.pointerEvents is deprecated. Use style.pointerEvents' fires when sheets open/close. Likely from a downstream RN-web layer, not user code. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/iter15_order_confirm_no_grabber.png",
+    "/tmp/iter15_final.png",
+    "/tmp/iter15_regression.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "BottomSheet.tsx:104-123 conditional render is clean — when draggable=false the entire GestureDetector wrapper AND the <View style={styles.grabber}/> are both skipped. No gesture handler attached → swipe-down cannot translate the sheet. Verified at runtime: sheet y stays at 208 across a 200px downward drag.",
+    "BottomSheet.tsx:29 new prop is correctly typed `draggable?: boolean` with default true (line 47) — backward-compatible for all existing consumers.",
+    "OrderConfirmSheet.tsx:87 correctly passes draggable={false}. No other BottomSheet usages in the codebase were touched, preserving default draggable=true.",
+    "Verified at runtime: scrollHeight=687, clientHeight=562, scrollTop transitions 0→125→0 succeed; sheet.getBoundingClientRect().y is invariant (208) → proves the inner ScrollView is the sole scroll surface and no pan gesture is attached.",
+    "Regression verified: max-loss-sheet still shows the 40x4 grabber pill (borderRadius:2px) and is still flickable closed via downward swipe — default behaviour for all other sheets is unaffected."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% — all 5 review items PASS (no grabber on OrderConfirmSheet ✓, bidirectional scroll without sheet movement ✓, swipe-down does NOT close ✓, max-loss-sheet regression intact with grabber + flick-to-dismiss ✓, cancel button still dismisses ✓)"},
+  "seed_data_creation": "None. Used demo/demo via POST /api/auth/login on the deployed preview env.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BottomSheet now accepts `draggable?: boolean` (default true). When false, both the GestureDetector wrap and the top grabber View are skipped. Only consumer using draggable=false is OrderConfirmSheet. All other sheets (max-loss-sheet via [data-testid=max-loss-pill] on /home, single-position-sheet, positions-menu-sheet, expiry-sheet, passphrase-sheet, save-profile-sheet) keep default draggable=true. To re-verify: open order-confirm-sheet via any buy-button-* preset on /home, check no 40x4 grabber exists inside [data-testid=order-confirm-sheet], scroll [data-testid=order-confirm-scroll] to bottom/top via .scrollTop, and confirm the sheet's bounding y is invariant. For regression open max-loss-sheet via [data-testid=max-loss-pill] and confirm the grabber AND the drag-to-dismiss both still work.",
+  "rca_of_issue": "Root cause from iter_14: BottomSheet's Pan gesture with activeOffsetY:[-9999,8] activated on any 8px+ downward drag — when user scrolled the inner ScrollView back to top and continued dragging, the pan handler hijacked the drag and started translating the sheet instead of letting the inner ScrollView consume it. Fix: added `draggable` prop; when false, the GestureDetector and grabber are both omitted so the sheet has no pan handler at all and the ScrollView is the sole scroll surface. Verified end-to-end: sheet y-coordinate is invariant across scroll AND across a deliberate swipe-down gesture."
+}

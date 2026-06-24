@@ -20,6 +20,13 @@ type Props = {
   children: ReactNode;
   /** Translate the sheet up by the keyboard height when it opens. */
   avoidKeyboard?: boolean;
+  /**
+   * When `false`, disables the drag-to-dismiss pan gesture and hides
+   * the top grabber pill. Use this for sheets that contain their own
+   * inner ScrollView so a "scroll past top" doesn't get swallowed by
+   * the sheet's pan handler. Default: `true`.
+   */
+  draggable?: boolean;
   testID?: string;
 };
 
@@ -28,11 +35,18 @@ type Props = {
  * - dims everything above with a tappable backdrop
  * - extends the white background into the bottom safe area
  * - sizes itself to its content
- * - draggable down to dismiss (swipe / fling)
+ * - draggable down to dismiss (swipe / fling) unless `draggable={false}`
  * - hairline (1dp) divider on top
  * - optionally translates up to clear the on-screen keyboard
  */
-export default function BottomSheet({ visible, onClose, children, avoidKeyboard = false, testID }: Props) {
+export default function BottomSheet({
+  visible,
+  onClose,
+  children,
+  avoidKeyboard = false,
+  draggable = true,
+  testID,
+}: Props) {
   const { Colors } = useTheme();
   const styles = useMemo(() => mkStyles(Colors), [Colors]);
   const { height: kbHeight } = useReanimatedKeyboardAnimation();
@@ -87,16 +101,26 @@ export default function BottomSheet({ visible, onClose, children, avoidKeyboard 
           onPress={onClose}
           testID={testID ? `${testID}-backdrop` : undefined}
         />
-        <GestureDetector gesture={pan}>
+        {draggable ? (
+          <GestureDetector gesture={pan}>
+            <Animated.View style={sheetStyle}>
+              <SafeAreaView edges={["bottom"]} style={styles.sheetBg}>
+                <View style={styles.sheet} testID={testID}>
+                  <View style={styles.grabber} />
+                  {children}
+                </View>
+              </SafeAreaView>
+            </Animated.View>
+          </GestureDetector>
+        ) : (
           <Animated.View style={sheetStyle}>
             <SafeAreaView edges={["bottom"]} style={styles.sheetBg}>
               <View style={styles.sheet} testID={testID}>
-                <View style={styles.grabber} />
                 {children}
               </View>
             </SafeAreaView>
           </Animated.View>
-        </GestureDetector>
+        )}
       </GestureHandlerRootView>
     </Modal>
   );
