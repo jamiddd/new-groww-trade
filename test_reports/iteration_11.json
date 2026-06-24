@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration_10 cleanup verified PASS. /app/frontend/src/components/BottomSheet.tsx line 108 has been migrated from the literal `#FFFFFF` to `Colors.surface` from the mkStyles(Colors) factory — confirmed by grep (no `#FFFFFF`/`#FFF`/`#fff`/`#ffffff` literals remain in the file). Live verification via Playwright (mobile viewport 390x844, demo/demo login, deployed env): in DARK mode the max-loss-sheet's SafeAreaView wrapper (sheetBg) measures rgb(10,10,10) == Colors.surface (DarkColors.surface = #0A0A0A) — matching the inner sheet — so the bottom safe-area strip themes correctly with the palette. In LIGHT mode both the wrapper and inner sheet measure rgb(255,255,255) — crisp white. Regression check on the kebab menu (header-menu-button → kebab-menu with menu-history/menu-settings/menu-refresh/menu-disconnect) passes in both dark and light mode with zero pageerrors. Theme switching from /settings (setting-theme-dark / setting-theme-light) propagates correctly to the home screen and all BottomSheet surfaces. No regressions detected on other surfaces fixed in iteration_10. Note: spec-mentioned testIDs `setting-max-loss-button` and `setting-confirm-trades-button` do not exist — the actual entry points are `max-loss-pill` on /home (opens max-loss-sheet) and the `setting-confirm` toggle row on /settings (not a BottomSheet opener); `preset.tsx` is its own screen, not a BottomSheet. The BottomSheet fix itself is correct regardless of opener.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "deprecated shadow* style props (carry-over from iter_9/iter_10, NOT in scope of iter_11)", "issue": "Runtime warning '\"shadow*\" style props are deprecated. Use \"boxShadow\".' still fires. Multiple StyleSheet entries in /app/frontend/app/home.tsx (sheetSurface, menuPanel, toast, expiryPopover) use shadowColor/shadowOpacity/shadowRadius/shadowOffset. Separate task — not blocking this iteration."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/t1_iter11_maxloss_dark.png",
+    "/tmp/t1_iter11_maxloss_light.png",
+    "/tmp/t1_iter11_expiry_dark.png",
+    "/tmp/t1_iter11_kebab_light.png",
+    "/tmp/t1_iter11_kebab_dark.png",
+    "/tmp/t1_iter11_settings_dark.png"
+  ],
+  "action_items": [
+    "(Optional, carry-over) Replace deprecated `shadow*` style props with `boxShadow` in home.tsx to silence the runtime warning. Unrelated to this iteration."
+  ],
+  "critical_code_review_comments": [
+    "BottomSheet.tsx:108 fix is correct: `sheetBg: { backgroundColor: Colors.surface }` and Colors is properly threaded through the mkStyles(Colors) factory (line 105) consumed via useMemo(() => mkStyles(Colors), [Colors]) at line 37. Style refreshes correctly when ThemeProvider toggles palette.",
+    "grep '#FFFFFF|#FFF|#ffffff|#fff' against BottomSheet.tsx returns zero matches — the file is fully palette-driven.",
+    "Live getComputedStyle measurement on the SafeAreaView wrapper (sheetBg) confirms rgb(10,10,10) in dark and rgb(255,255,255) in light — matches DarkColors.surface and LightColors.surface from /app/frontend/src/theme.ts."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% — iter_10 leftover is fixed; no new regressions"},
+  "seed_data_creation": "None. Used demo/demo login on the deployed preview env.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Theme switching is fully production-ready. BottomSheet.tsx now uses Colors.surface for the SafeAreaView bottom-edge strip. Verified live via getComputedStyle on max-loss-sheet wrapper in both dark (rgb(10,10,10)) and light (rgb(255,255,255)). Carry-over: deprecated shadow* style props warning in home.tsx (separate task).",
+  "rca_of_issue": "Iter_10 flagged that line 108 of BottomSheet.tsx still contained `sheetBg: { backgroundColor: '#FFFFFF' }` — a leftover white literal in the SafeAreaView edges=['bottom'] wrapper that would render as a white strip below the sheet on iOS notch devices in dark mode (invisible in the 390x844 web preview because web has zero safe-area bottom inset). E1 changed it to `Colors.surface` so the wrapper themes via the palette. T1 verified both via static grep (no white literals remain) and live DOM measurement (wrapper bg = rgb(10,10,10) in dark, rgb(255,255,255) in light)."
+}

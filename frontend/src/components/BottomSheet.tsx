@@ -105,7 +105,7 @@ export default function BottomSheet({ visible, onClose, children, avoidKeyboard 
 const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1 },
   backdrop: { flex: 1, backgroundColor: "transparent" },
-  sheetBg: { backgroundColor: "#FFFFFF" },
+  sheetBg: { backgroundColor: Colors.surface },
   sheet: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: 16,
