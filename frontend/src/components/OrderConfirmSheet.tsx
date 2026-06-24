@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, useWindowDimensions } from "react-native";
 
 import { ColorPalette, FONT } from "@/src/theme";
 import { useTheme } from "@/src/theme/ThemeProvider";
@@ -76,13 +76,26 @@ export default function OrderConfirmSheet({
   const lotSize = Number(preview?.lot_size ?? 0);
   const cost = Number(preview?.estimated_cost ?? ltp * qty);
   const isLimit = (ord.order_type || "").toUpperCase() === "LIMIT";
+  const { height: vh } = useWindowDimensions();
+  // Total sheet content height = 80% of screen. We subtract a small
+  // allowance for the BottomSheet's own padding + grabber + safe-area
+  // bottom inset so the *visible* sheet ends up close to 80vh and the
+  // footer never overlaps the gesture-nav indicator.
+  const sheetContentHeight = Math.round(vh * 0.8) - 56;
 
   return (
     <BottomSheet visible={visible} onClose={onCancel} testID="order-confirm-sheet">
-      <Text style={styles.title}>{presetLabel}</Text>
-      <Text style={styles.sub}>
-        {underlying} · {expiry} · {optionType}
-      </Text>
+      <View style={[styles.sheetContainer, { height: sheetContentHeight }]}>
+        <ScrollView
+          style={styles.scrollArea}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator
+          testID="order-confirm-scroll"
+        >
+          <Text style={styles.title}>{presetLabel}</Text>
+          <Text style={styles.sub}>
+            {underlying} · {expiry} · {optionType}
+          </Text>
 
       {loading || !preview ? (
         <View style={styles.loadingBlock}>
@@ -238,27 +251,30 @@ export default function OrderConfirmSheet({
           ) : null}
         </>
       )}
+        </ScrollView>
 
-      <View style={styles.row}>
-        <TouchableOpacity
-          style={[styles.btn, styles.cancelBtn]}
-          onPress={onCancel}
-          testID="order-confirm-cancel"
-        >
-          <Text style={styles.cancelText}>CANCEL</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.btn,
-            styles.confirmBtn,
-            (placing || loading || qty < 1 || !sel.trading_symbol) && { opacity: 0.4 },
-          ]}
-          onPress={onConfirm}
-          disabled={placing || loading || qty < 1 || !sel.trading_symbol}
-          testID="order-confirm-place"
-        >
-          {placing ? <ActivityIndicator color="#FFF" /> : <Text style={styles.confirmText}>PLACE ORDER</Text>}
-        </TouchableOpacity>
+        {/* Sticky footer — Cancel + Place Order always visible. */}
+        <View style={styles.stickyFooter}>
+          <TouchableOpacity
+            style={[styles.btn, styles.cancelBtn]}
+            onPress={onCancel}
+            testID="order-confirm-cancel"
+          >
+            <Text style={styles.cancelText}>CANCEL</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.btn,
+              styles.confirmBtn,
+              (placing || loading || qty < 1 || !sel.trading_symbol) && { opacity: 0.4 },
+            ]}
+            onPress={onConfirm}
+            disabled={placing || loading || qty < 1 || !sel.trading_symbol}
+            testID="order-confirm-place"
+          >
+            {placing ? <ActivityIndicator color="#FFF" /> : <Text style={styles.confirmText}>PLACE ORDER</Text>}
+          </TouchableOpacity>
+        </View>
       </View>
     </BottomSheet>
   );
@@ -294,6 +310,25 @@ function Row({
 }
 
 const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
+  // Fixed-height column. The BottomSheet auto-sizes to this height,
+  // ScrollView consumes the remaining flex, footer stays pinned bottom.
+  sheetContainer: {
+    flexDirection: "column",
+  },
+  scrollArea: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 16,
+  },
+  stickyFooter: {
+    flexDirection: "row",
+    gap: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderLight,
+    backgroundColor: Colors.surface,
+  },
   title: { fontFamily: FONT, fontWeight: "bold", fontSize: 16, color: Colors.text, letterSpacing: 0.4 },
   sub: { fontFamily: FONT, fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
   loadingBlock: { paddingVertical: 24, alignItems: "center", gap: 8 },

@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration_14 OrderConfirmSheet fixed-80vh layout + scrollable middle + sticky footer VERIFIED end-to-end via live mobile viewport (390x844) Playwright on the deployed Expo web preview using demo/demo login. All 5 review-request items pass in BOTH light and dark mode. (1) Sheet height: measured sheet.getBoundingClientRect().height = 652px at vh=844; target = round(844*0.8) = 675px → diff = -23px, well within the spec's ±40 tolerance (accounts for the -56 chrome subtraction in the component). (2) Inner ScrollView [data-testid=order-confirm-scroll] is genuinely scrollable: scrollHeight=687 > clientHeight=562, and getComputedStyle(scrollEl).flex='1 1 0%' confirming flex:1 from styles.scrollArea. Programmatic el.scrollTop = el.scrollHeight successfully advanced scrollTop from 0 → 125. (3) Sticky-footer verified: cancel and place button getBoundingClientRect().top both = 792 BEFORE scroll AND 792 AFTER scroll → delta = 0px for both buttons. testIDs `order-confirm-cancel` and `order-confirm-place` were visible (offsetParent !== null) and tappable both pre-scroll and post-scroll (POST-SCROLL cancel click succeeded and closed the sheet). (4) Dark-mode regression: switched via setting-theme-dark then re-opened; heroPriceBlock backgroundColor resolved to rgba(26, 77, 255, 0.1) (verified via getComputedStyle walking up from entry-price) — iteration_13 dark-mode tints still composite correctly within the new fixed-height layout. Sheet height in dark mode also 652px (identical layout, no regression). (5) Double-scroll regression: walked the ancestor chain of the BottomSheet looking for any overflowY:auto|scroll element with scrollHeight>clientHeight — found ZERO. Only the inner ScrollView scrolls; the BottomSheet itself does not. Zero pageerrors throughout. Deprecated shadow* warning persists from home.tsx (carry-over from iteration_9/10/11/12/13, out of scope). Screenshots saved at /tmp/iter14_light_pre.png, /tmp/iter14_light_post_scroll.png, /tmp/iter14_dark_pre.png, /tmp/iter14_dark_post_scroll.png.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "deprecated shadow* style props (home.tsx, carry-over)", "issue": "Runtime warning '\"shadow*\" style props are deprecated. Use \"boxShadow\".' continues to fire on /home. Not related to OrderConfirmSheet iteration_14 scope — flagged in iter_9/10/11/12/13 already."},
+      {"component": "deprecated props.pointerEvents (Pressable/Modal interaction)", "issue": "Runtime warning 'props.pointerEvents is deprecated. Use style.pointerEvents' fires when the sheet opens/closes. Likely from a downstream RN/Reanimated library, not user code. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/iter14_light_pre.png",
+    "/tmp/iter14_light_post_scroll.png",
+    "/tmp/iter14_dark_pre.png",
+    "/tmp/iter14_dark_post_scroll.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "OrderConfirmSheet.tsx:79-84 sheetContentHeight = Math.round(vh*0.8) - 56 correctly yields 619px on a 844px viewport. After BottomSheet's own paddings (paddingTop:8, paddingBottom:8 + grabber height 4 + grabber marginBottom:12 + safe-area bottom which is 0 on web) the observed sheet height is 652px — the math holds: 619 (inner column) + 8 + 8 + 4 + 12 ≈ 651, matches measured 652. Good.",
+    "OrderConfirmSheet.tsx:318-323 scrollArea uses flex:1 + scrollContent paddingBottom:16 — getComputedStyle confirms flex:'1 1 0%' at runtime, scrollHeight 687 > clientHeight 562 = correctly scrollable.",
+    "OrderConfirmSheet.tsx:324-331 stickyFooter is OUTSIDE the ScrollView and sits at the bottom of the fixed-height column with borderTopWidth:1 + borderTopColor:Colors.borderLight + backgroundColor:Colors.surface — verified pinned (cancel/place y delta = 0 across a 125px scroll).",
+    "OrderConfirmSheet.tsx:257-277 footer correctly renders CANCEL + PLACE ORDER as siblings inside stickyFooter View (outside ScrollView closing </ScrollView> at line 254). Architecture is clean — single source of layout truth (the View with explicit height={sheetContentHeight}) drives both the BottomSheet's outer size and the inner flex partition.",
+    "No double-scroll regression: walked the ancestor chain from [data-testid=order-confirm-sheet] up to <html>, found zero elements with overflowY:auto|scroll AND scrollHeight>clientHeight. Only the inner ScrollView scrolls.",
+    "Dark-mode tints from iter_13 fully preserved within the new scroll layout — heroPriceBlock bg still resolves to rgba(26,77,255,0.1) on both surfaces."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% — all 5 spec items pass in light AND dark mode (sheet ~80vh ✓, inner ScrollView flex:1 + scrollable ✓, sticky footer y-delta=0 across scroll ✓, testIDs present+tappable pre/post scroll ✓, no double-scroll ✓, dark-mode tints preserved ✓)"},
+  "seed_data_creation": "None. Used demo/demo via POST /api/auth/login on the deployed preview env.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Demo login (api_key=demo, api_secret=demo) via testID login-connect-button. /settings has setting-theme-dark / setting-theme-light toggles persisted to localStorage 'theme_mode'. Active /home preset testIDs are buy-button-breakout_mkt, buy-button-breakout_chaser_lmt, buy-button-steady_mkt, buy-button-steady_lmt. Inside the OrderConfirmSheet: testIDs order-confirm-sheet (outer), order-confirm-scroll (inner ScrollView, flex:1, scrollable), order-confirm-cancel + order-confirm-place (sticky footer outside ScrollView). Sheet height target = round(vh*0.8) - 56 chrome → ~619px inner column → ~652px outer (vh=844). Cancel/Place y-position = 792 on 844vh. To re-verify stickiness: scroll inner via document.querySelector('[data-testid=\"order-confirm-scroll\"]').scrollTop = el.scrollHeight then re-measure cancel/place getBoundingClientRect().top — should remain unchanged.",
+  "rca_of_issue": "N/A — this iteration is a structural enhancement, not a bug fix. The implementation correctly partitions the BottomSheet's content into a fixed-height column (80vh - 56 chrome) with a flex:1 inner ScrollView and a sticky footer View. All measurements at runtime confirm the spec: sheet height within tolerance, inner scroll independent of footer, no ancestor scroll containers introduced. No further action required."
+}
