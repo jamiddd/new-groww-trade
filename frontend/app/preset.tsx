@@ -138,12 +138,10 @@ export default function PresetScreen() {
         {preset.order_type === "LIMIT" ? (
           <Row
             title="LIMIT OFFSET"
-            description="% above LTP when placing BUY LMT order."
-            value={`${preset.limit_offset_pct}%`}
-            onPress={() => {
-              setTempNum(String(preset.limit_offset_pct));
-              setPickerType("limit");
-            }}
+            description="Auto: 7% below LTP on 0 DTE · 3% below LTP otherwise."
+            value="Dynamic"
+            onPress={() => {}}
+            disabled
             testID="row-limit"
           />
         ) : null}

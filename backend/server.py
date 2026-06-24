@@ -1325,6 +1325,28 @@ def _round_tick(price: float) -> float:
     return round(round(price * 20.0) / 20.0, 2)
 
 
+def _is_zero_dte(expiry_str: str) -> bool:
+    """True if `expiry_str` (YYYY-MM-DD) is TODAY in Indian Standard Time.
+    Falls back to UTC date if zoneinfo isn't available."""
+    if not expiry_str:
+        return False
+    try:
+        from zoneinfo import ZoneInfo  # py3.9+
+        today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    except Exception:  # noqa: BLE001
+        today_ist = datetime.now(timezone.utc).date().isoformat()
+    return expiry_str[:10] == today_ist
+
+
+def _limit_offset_pct_for_expiry(expiry_str: str) -> float:
+    """Dynamic LIMIT-buy discount based on time-to-expiry:
+      • 0 DTE (expiry == today)  → 7% — option premium decays faster intraday,
+        so we want to bid more aggressively below LTP to catch wicks.
+      • non-0 DTE                → 3% — gentler bid for longer-dated options.
+    The preset's saved `limit_offset_pct` is ignored in favour of this rule."""
+    return 7.0 if _is_zero_dte(expiry_str) else 3.0
+
+
 def _compute_sl_tp(entry_price: float, sl_pct: float, tp_pct: float) -> Dict[str, float]:
     """Returns a {sl, tp} dict of rounded trigger prices. 0 means "not set"."""
     sl = _round_tick(entry_price * (1 - sl_pct / 100.0)) if sl_pct > 0 and entry_price > 0 else 0.0
@@ -1637,10 +1659,11 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             )
 
         if payload.dry_run:
+            limit_off_demo = _limit_offset_pct_for_expiry(payload.expiry) / 100.0
             entry_demo = (
                 ltp
                 if order_type_str == "MARKET"
-                else _round_tick(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100))
+                else _round_tick(ltp * (1 - limit_off_demo))
             )
             demo_levels = _compute_sl_tp(
                 entry_demo,
@@ -1749,11 +1772,13 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             await _save_demo_state(token, doc)
         # Compute the LIMIT price the same way as for live orders so the
         # demo response shape matches and the confirmation dialog can
-        # honor sticky-pricing.
+        # honor sticky-pricing. Always BELOW LTP, with the DTE-aware
+        # offset (7% on 0 DTE, 3% otherwise).
         if payload.limit_price_override and payload.limit_price_override > 0 and order_type_str == "LIMIT":
             demo_price = _round_tick(float(payload.limit_price_override))
         elif order_type_str == "LIMIT":
-            demo_price = _round_tick(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100))
+            demo_off = _limit_offset_pct_for_expiry(payload.expiry) / 100.0
+            demo_price = _round_tick(ltp * (1 - demo_off))
         else:
             demo_price = 0.0
         return {
@@ -1917,11 +1942,12 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         if payload.limit_price_override and payload.limit_price_override > 0:
             price = _round_tick(payload.limit_price_override)
         else:
-            offset = float(preset_doc.get("limit_offset_pct", 0.5)) / 100.0
-            # Round to the 0.05 option tick so the price exactly reflects
-            # the configured offset percentage (and Groww doesn't reject
-            # for invalid tick increments).
-            price = _round_tick(pick["ltp"] * (1 + offset))
+            # LIMIT BUY is always placed BELOW LTP (we want a discount on
+            # the entry). Offset is DTE-aware:
+            #   0 DTE  → 7%  (faster decay, bid more aggressively)
+            #   else   → 3%
+            offset_pct = _limit_offset_pct_for_expiry(payload.expiry) / 100.0
+            price = _round_tick(pick["ltp"] * (1 - offset_pct))
 
     order_payload = {
         "validity": GrowwAPI.VALIDITY_DAY,
