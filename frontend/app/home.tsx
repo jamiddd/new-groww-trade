@@ -1261,7 +1261,12 @@ const styles = StyleSheet.create({
 
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
   buyBtn: {
-    width: "49.4%",
+    // Robust 2-column layout: flexBasis seeds each button at ~48% of the
+    // row, flexGrow lets it stretch to consume the remaining 4 px gap.
+    // No more "49.4% + 4 px > 100% → wraps to single column" surprise on
+    // iPhone preview / smaller widths.
+    flexBasis: "48%",
+    flexGrow: 1,
     height: 70,
     alignItems: "center",
     justifyContent: "center",
@@ -1270,7 +1275,13 @@ const styles = StyleSheet.create({
   },
   buyText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", textAlign: "center", fontSize: 12, letterSpacing: 0.6 },
   exitRow: { flexDirection: "row", gap: 4, marginTop: 4 },
-  exitBtn: { height: 56, borderRadius: 2, alignItems: "center", justifyContent: "center" },
+  exitBtn: {
+    flex: 1,
+    height: 56,
+    borderRadius: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   exitPartial: { flex: 1, backgroundColor: Colors.dangerDark },
   exitAll: { backgroundColor: Colors.danger, marginTop: 4 },
   exitText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", fontSize: 12, letterSpacing: 0.6 },
