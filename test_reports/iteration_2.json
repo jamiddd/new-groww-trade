@@ -1,0 +1,42 @@
+{
+  "summary": "Frontend-only verification of the bottom ACTIONS panel fix on /home for iPhone (390x844), Android (412x915) and tall Android (412x1000) viewports. Pre-seeded localStorage with a fake groww_access_token so the bootstrap router redirects to /home (backend API calls fail/empty as expected — Mixed Content on the HTTPS preview against the HTTP backend, so positions list shows the empty-state and the expiry popover shows 'No expiries available.'). All four buy presets, the CE/PE toggle, the max-loss pill, the EXIT 25%/50% buttons, the EXIT ALL button, the actions-toggle and the expiry popover render and are tappable, and tapping EXIT ALL with zero positions produces the expected 'No open positions' toast. The expiry popover (`expiry-sheet`) opens anchored under the header chip, renders the No-expiries fallback message, and dismisses on outside-tap. HOWEVER: a visual regression was introduced by the panelBudget fix. The `exit-all-button` element reports a layout height of only ~14px across all three viewports (vs the inline `height: exitBtnHeight` of 56–66px). Root cause: `styles.exitBtn` carries `flex: 1` (required for the EXIT 25/50 row to share width), and `exit-all-button` reuses that same style as a STANDALONE child of the column-flex `sheetBody`. In a column-flex container `flex:1` = `flexGrow:1, flexShrink:1, flexBasis:0`, so when sheetBody is height-constrained by the measured Animated.View bodyHeight, `exit-all-button` is the only child with `flexShrink:1` and it absorbs all the squeeze — collapsing to ~14px. The 'clipping below gesture-nav' part of the user-reported bug IS fixed (exit-all bottom = 832/903/988 vs vh 844/915/1000), but the button is now visually a thin red strip with the label overflowing.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "home.tsx — exit-all-button",
+        "issue": "exit-all-button renders ~14px tall instead of the declared exitBtnHeight (56/60/66 on the three viewports). styles.exitBtn applies flex:1 which, on the standalone EXIT ALL row inside the column-flex sheetBody, lets flexShrink absorb the entire layout overflow when Animated.View bodyHeight constrains the panel. The label is visible only because text isn't clipped, but the red pill is a thin strip. Reproduce: open /home on any viewport, observe EXIT ALL button visually + getBoundingClientRect().height on [data-testid=\"exit-all-button\"]. Fix: override flex on EXIT ALL — e.g. in styles.exitAll add `flex: 0, alignSelf: 'stretch'` (or split styles.exitBtn into a base without flex and a row-only style that adds flex:1). Reference: /app/frontend/app/home.tsx:868-874 and styles at /app/frontend/app/home.tsx:1391-1398.",
+        "testID": "exit-all-button",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "home.tsx ACTIONS panel",
+        "issues": [
+          "The panelBudget math reserves enough vertical room (484/555/640 px budget on 844/915/1000 vh) but because of the flex:1 regression above, the saved budget is collapsed entirely into exit-all-button — the actual ratio of buy:exit visible heights is now distorted (buys 72/78/85, partial exits 56/60/66, exit-all 14/15/15)."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_2.json", "/app/backend/tests/test_backend.py"],
+  "action_items": [
+    "FIX: in /app/frontend/app/home.tsx styles.exitAll add `flex: 0, alignSelf: 'stretch'` so the standalone EXIT ALL button respects its inline `height: exitBtnHeight` instead of being flex-shrunk to absorb sheetBody overflow.",
+    "After the fix, re-verify exit-all-button getBoundingClientRect().height ≈ exitBtnHeight (≥44 px) on viewports 390x844, 412x915, 412x1000 and confirm it remains fully inside the viewport (bottom ≤ vh - insets.bottom).",
+    "Optional: clarify in the review request — the actual buy-preset testIDs are `buy-button-breakout_mkt`, `buy-button-breakout_chaser_lmt`, `buy-button-steady_mkt`, `buy-button-steady_lmt`. The prompt asked for `_call_` variants which do not exist (CE vs PE is driven by the ce-pe-toggle, not the preset key)."
+  ],
+  "critical_code_review_comments": [
+    "home.tsx is 1527 lines (component + styles). Consider splitting the persistent ACTIONS sheet, the popover, and the styles object into separate files to stay below the 700-line per-file guideline.",
+    "panelBudget calculation in home.tsx (lines 94-110) is sound on paper but is undermined by a single flex:1 leak on EXIT ALL — when one child has flexShrink while siblings have explicit heights, any rounding-error overflow goes entirely to that child. Prefer explicit `flex: 0` on standalone-height buttons.",
+    "The sheetSurface paddingBottom uses `Math.max(8, insets.bottom > 0 ? 8 : 12)` which is the same as just `insets.bottom > 0 ? 8 : 12` — Math.max(8, X) where X≥8 is redundant. Consider tightening to `Math.max(insets.bottom, 8)` so devices with a tall gesture inset actually get the inset respected here (right now bottom inset is added by the SafeAreaView edges=['bottom'] wrapper, so functionally fine, just confusing)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "75% — original gesture-nav clipping bug is fixed (exit-all is inside viewport on 412x915/1000), but a HIGH-priority visual regression remains (button is ~14px tall)."},
+  "seed_data_creation": "None on backend. On the frontend, seeded localStorage['groww_access_token']=JSON.stringify('FAKE_TOKEN_FOR_TEST') and ['actions_collapsed']=false to bypass /login and ensure the panel is expanded for the verification.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To test /home in the web preview, seed localStorage on the origin before navigating: localStorage.setItem('groww_access_token', JSON.stringify('FAKE')) and localStorage.setItem('actions_collapsed', JSON.stringify(false)). The backend on the DigitalOcean droplet is HTTP and blocked by Mixed Content from the HTTPS preview, so positions are empty and expiries return zero — that's expected. After the EXIT ALL fix, verify `getBoundingClientRect().height` on [data-testid=\"exit-all-button\"] is close to the declared exitBtnHeight (56–66) on viewports 390x844, 412x915, 412x1000. The testID `expiry-sheet` is the Pressable backdrop (covers the full screen) and the popover content is its child — backdrop.innerText still returns the popover text so existing assertions are fine.",
+  "rca_of_issue": "Bug: EXIT ALL POSITIONS button now visible inside viewport on tall Android (412x915), so the originally-reported gesture-nav clip is FIXED. Side-effect bug introduced by the same fix: exit-all-button collapses to a ~14 px strip. Reproduction: open /home on any size; inspect [data-testid=\"exit-all-button\"].getBoundingClientRect(). Cause: panelBudget shrinks the panel just enough that the body has 0-or-near-0 extra space, and exit-all is the only descendant with `flexShrink:1` (inherited from styles.exitBtn `flex:1`). flexShrink absorbs the remainder into exit-all, ignoring the inline `height: exitBtnHeight`. Mitigation: add `flex: 0, alignSelf: 'stretch'` to styles.exitAll (or refactor styles.exitBtn to drop flex and have only the partial exits opt-in to flex:1 via styles.exitPartial)."
+}

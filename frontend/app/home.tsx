@@ -13,7 +13,7 @@ import {
   TextInput,
   useWindowDimensions,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import Animated, {
@@ -72,12 +72,42 @@ const formatUSD = (n: number, rate: number) =>
 export default function Home() {
   const router = useRouter();
   const { width: vw, height: vh } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
-  // Viewport-driven sizing for the buy/exit buttons. Cleaner than CSS
-  // media queries — we just clamp into reasonable touch-target bounds.
-  // Reference design (iPhone 14 Pro) ≈ 390 × 844.
-  const buyBtnHeight = Math.max(56, Math.min(96, Math.round(vh * 0.085)));
-  const exitBtnHeight = Math.max(44, Math.min(72, Math.round(vh * 0.066)));
+  // ─── Viewport-driven sizing for the buy/exit buttons ─────────────────
+  // We start from the original viewport ratios (designed against the
+  // iPhone 14 Pro ≈ 390 × 844) but then constrain them to a *panel
+  // budget* — i.e. the max height the actions panel may consume without
+  // pushing the EXIT ALL button below the visible viewport (which can
+  // happen on tall Android devices with a gesture nav bar).
+  //
+  // Panel layout (vertical stack):
+  //   sheet header  (grabber + ACTIONS label, ≈ 70 px)
+  //   footer top    (Set Max Loss pill + CE/PE toggle, ≈ 46 px)
+  //   buy grid      (2 rows × buyBtnHeight + 4 px gap)
+  //   exit row      (1 row × exitBtnHeight + 4 px top margin)
+  //   exit all      (1 row × exitBtnHeight + 4 px top margin)
+  //   surface pad   (paddingBottom 8 px + safe-area bottom inset)
+  //
+  // Reserve at least 220 px of viewport above the panel for the header,
+  // capital card, and position list scroll area.
+  const reservedAbove = 220; // header + capital card + min scroll area
+  const panelChrome = 70 /* sheet header */ + 46 /* footer top */ + 8 /* pad */ + 8 /* extra slack */;
+  const panelBudget = Math.max(
+    260,
+    vh - reservedAbove - panelChrome - Math.max(insets.bottom, 8) - Math.max(insets.top, 0),
+  );
+  // The grid + exit rows + exit all (5 buttons worth of height
+  // contributions) must all fit inside panelBudget. We weight buys
+  // ~1.3× the exit buttons.
+  //   2 * buyH + 2 * exitH + 4*4 (gaps) ≤ panelBudget
+  //   buyH = 1.3 * exitH
+  //   ⇒ exitH ≤ (panelBudget - 16) / 4.6
+  const exitFromBudget = Math.floor((panelBudget - 16) / 4.6);
+  const buyFromBudget = Math.floor(exitFromBudget * 1.3);
+
+  const buyBtnHeight = Math.max(56, Math.min(96, Math.min(Math.round(vh * 0.085), buyFromBudget)));
+  const exitBtnHeight = Math.max(44, Math.min(72, Math.min(Math.round(vh * 0.066), exitFromBudget)));
   const buyTextSize = Math.max(11, Math.min(15, Math.round(vw * 0.034)));
   const exitTextSize = Math.max(10, Math.min(14, Math.round(vw * 0.032)));
 
@@ -728,7 +758,7 @@ export default function Home() {
           top corners, and an upward elevation shadow. Stays in layout
           so the ScrollView above naturally insets around it. */}
       <SafeAreaView edges={["bottom"]} style={styles.sheetSafeBg}>
-        <View style={styles.sheetSurface}>
+        <View style={[styles.sheetSurface, { paddingBottom: Math.max(8, insets.bottom > 0 ? 8 : 12) }]}>
           <GestureDetector gesture={actionsPanGesture}>
             <View>
               <TouchableOpacity
