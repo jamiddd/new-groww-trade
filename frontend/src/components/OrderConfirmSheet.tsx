@@ -1,6 +1,8 @@
+import { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
 
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 import BottomSheet from "./BottomSheet";
 
 export type OrderPreview = {
@@ -63,6 +65,8 @@ export default function OrderConfirmSheet({
   onConfirm,
   onCancel,
 }: Props) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   const sel = preview?.selected ?? {};
   const ord = preview?.order ?? {};
   const preset = preview?.preset ?? {};
@@ -287,7 +291,7 @@ function Row({
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   title: { fontFamily: FONT, fontWeight: "bold", fontSize: 16, color: Colors.text, letterSpacing: 0.4 },
   sub: { fontFamily: FONT, fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
   loadingBlock: { paddingVertical: 24, alignItems: "center", gap: 8 },

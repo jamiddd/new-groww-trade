@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -18,7 +18,8 @@ import * as Clipboard from "expo-clipboard";
 
 import { api, setToken } from "@/src/api/client";
 import { storage } from "@/src/utils/storage";
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 import BottomSheet from "@/src/components/BottomSheet";
 
 type SavedProfile = {
@@ -48,6 +49,8 @@ async function getOrCreateDeviceToken(): Promise<string> {
 
 export default function Login() {
   const router = useRouter();
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
 
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
@@ -486,7 +489,7 @@ export default function Login() {
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
   container: { padding: 20, paddingTop: 24, gap: 14 },
 

@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useMemo } from "react";
 import { Modal, Pressable, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, {
@@ -11,7 +11,8 @@ import Animated, {
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 
-import { Colors } from "@/src/theme";
+import { ColorPalette } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 
 type Props = {
   visible: boolean;
@@ -32,6 +33,8 @@ type Props = {
  * - optionally translates up to clear the on-screen keyboard
  */
 export default function BottomSheet({ visible, onClose, children, avoidKeyboard = false, testID }: Props) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   const { height: kbHeight } = useReanimatedKeyboardAnimation();
   const dragY = useSharedValue(0);
 
@@ -99,7 +102,7 @@ export default function BottomSheet({ visible, onClose, children, avoidKeyboard 
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1 },
   backdrop: { flex: 1, backgroundColor: "transparent" },
   sheetBg: { backgroundColor: "#FFFFFF" },

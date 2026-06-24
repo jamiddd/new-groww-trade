@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api, Preset } from "@/src/api/client";
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 import BottomSheet from "@/src/components/BottomSheet";
 
 const STRIKE_OPTIONS = ["HIGH_GAMMA", "ATM", "OTM1", "OTM2", "ITM1"];
@@ -35,6 +36,8 @@ const IV_LABELS: Record<string, string> = {
 export default function PresetScreen() {
   const router = useRouter();
   const { key } = useLocalSearchParams<{ key: string }>();
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   const [preset, setPreset] = useState<Preset | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -400,7 +403,7 @@ function RiskPicker({
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
   header: {
     flexDirection: "row",

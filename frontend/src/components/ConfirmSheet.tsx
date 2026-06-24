@@ -1,6 +1,8 @@
+import { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 import BottomSheet from "./BottomSheet";
 
 type Props = {
@@ -26,6 +28,8 @@ export default function ConfirmSheet({
   onCancel,
   testID,
 }: Props) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <BottomSheet visible={visible} onClose={onCancel} testID={testID}>
       <Text style={styles.title}>{title}</Text>
@@ -50,7 +54,7 @@ export default function ConfirmSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   title: { fontFamily: FONT, fontWeight: "bold", fontSize: 16, color: Colors.text },
   message: { fontFamily: FONT, fontSize: 14, color: Colors.textSecondary, marginTop: 8 },
   row: { flexDirection: "row", gap: 12, marginTop: 20, marginBottom: 8 },

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -13,13 +13,16 @@ import { useRouter } from "expo-router";
 
 import { api, AppSettings, disconnect } from "@/src/api/client";
 import { storage } from "@/src/utils/storage";
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { ThemeMode, useTheme } from "@/src/theme/ThemeProvider";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
 
 const ALWAYS_NEAREST_EXPIRY_KEY = "always_nearest_expiry";
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { Colors, mode: themeMode, setMode: setThemeMode } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   const [s, setS] = useState<AppSettings | null>(null);
   const [alwaysNearestExpiry, setAlwaysNearestExpiry] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -124,6 +127,31 @@ export default function SettingsScreen() {
           testID="setting-practice-mode"
         />
 
+        {/* ───────── Appearance ───────── */}
+        <Text style={styles.sectionLabel}>APPEARANCE</Text>
+        <View style={styles.themeRow}>
+          {(["light", "dark", "system"] as ThemeMode[]).map((m) => {
+            const selected = themeMode === m;
+            const label = m === "light" ? "Light" : m === "dark" ? "Dark" : "System";
+            const emoji = m === "light" ? "☀️" : m === "dark" ? "🌙" : "📱";
+            return (
+              <TouchableOpacity
+                key={m}
+                style={[styles.themeOption, selected && styles.themeOptionActive]}
+                onPress={() => setThemeMode(m)}
+                testID={`setting-theme-${m}`}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.themeEmoji]}>{emoji}</Text>
+                <Text style={[styles.themeLabel, selected && styles.themeLabelActive]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.appearanceHint}>
+          OLED-black palette on dark. &quot;System&quot; follows your device setting.
+        </Text>
+
         <TouchableOpacity
           style={styles.logoutBtn}
           onPress={() => setConfirmLogout(true)}
@@ -162,6 +190,8 @@ function SettingRow({
   onChange: (v: boolean) => void;
   testID?: string;
 }) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <View style={styles.row} testID={testID}>
       <View style={{ flex: 1, paddingRight: 12 }}>
@@ -178,7 +208,7 @@ function SettingRow({
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
   header: {
     flexDirection: "row",
@@ -209,4 +239,47 @@ const styles = StyleSheet.create({
   },
   logoutText: { fontFamily: FONT, color: Colors.danger, fontWeight: "bold", letterSpacing: 1.2 },
   error: { fontFamily: FONT, color: Colors.dangerDark, textAlign: "center", marginTop: 16 },
+
+  // Appearance section
+  sectionLabel: {
+    fontFamily: FONT,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1.4,
+    marginTop: 24,
+    marginBottom: 10,
+  },
+  themeRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  themeOption: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    backgroundColor: Colors.pillBg,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
+  themeOptionActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surfaceElevated,
+  },
+  themeEmoji: { fontSize: 22, marginBottom: 4 },
+  themeLabel: {
+    fontFamily: FONT,
+    color: Colors.textSecondary,
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  themeLabelActive: { color: Colors.primary, fontWeight: "700" },
+  appearanceHint: {
+    fontFamily: FONT,
+    color: Colors.textMuted,
+    fontSize: 11,
+    marginTop: 8,
+  },
 });

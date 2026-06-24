@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
 import { api } from "@/src/api/client";
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 
 type OrderRow = {
   order_id?: string;
@@ -41,17 +42,20 @@ type OrderRow = {
   realised_pnl?: number | null;
 };
 
-const STATUS_PILLS: Record<string, { bg: string; fg: string }> = {
+const buildStatusPills = (Colors: ColorPalette): Record<string, { bg: string; fg: string }> => ({
   EXECUTED: { bg: "rgba(26,77,255,0.08)", fg: Colors.primary },
   COMPLETE: { bg: "rgba(26,77,255,0.08)", fg: Colors.primary },
   PENDING: { bg: "rgba(0,0,0,0.05)", fg: Colors.textSecondary },
   CANCELLED: { bg: "rgba(0,0,0,0.05)", fg: Colors.textSecondary },
   REJECTED: { bg: "rgba(185,28,28,0.08)", fg: Colors.dangerDark },
   FAILED: { bg: "rgba(185,28,28,0.08)", fg: Colors.dangerDark },
-};
+});
 
 export default function History() {
   const router = useRouter();
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
+  const STATUS_PILLS = useMemo(() => buildStatusPills(Colors), [Colors]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +158,7 @@ export default function History() {
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
   header: {
     flexDirection: "row",

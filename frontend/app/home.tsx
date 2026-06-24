@@ -26,7 +26,8 @@ import Animated, {
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api, disconnect, AppSettings } from "@/src/api/client";
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 import { storage } from "@/src/utils/storage";
 import { formatExpiry } from "@/src/utils/format";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
@@ -99,6 +100,8 @@ const TOAST_PALETTE: Record<ToastType, { bg: string; border: string; text: strin
 
 export default function Home() {
   const router = useRouter();
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -1150,7 +1153,7 @@ function MenuItem({
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
   header: {
     flexDirection: "row",

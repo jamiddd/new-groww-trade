@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Modal,
   View,
@@ -13,7 +13,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { api } from "@/src/api/client";
-import { Colors, FONT } from "@/src/theme";
+import { ColorPalette, FONT } from "@/src/theme";
+import { useTheme } from "@/src/theme/ThemeProvider";
 
 type UnderlyingItem = { symbol: string; name: string; type: string };
 
@@ -24,6 +25,8 @@ type Props = {
 };
 
 export default function UnderlyingSearchSheet({ visible, onPick, onClose }: Props) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   const [q, setQ] = useState("");
   const [items, setItems] = useState<UnderlyingItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -101,7 +104,7 @@ export default function UnderlyingSearchSheet({ visible, onPick, onClose }: Prop
   );
 }
 
-const styles = StyleSheet.create({
+const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bg },
   header: {
     flexDirection: "row",
