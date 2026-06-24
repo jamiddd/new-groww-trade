@@ -111,6 +111,23 @@ export default function Home() {
   const buyTextSize = Math.max(11, Math.min(15, Math.round(vw * 0.034)));
   const exitTextSize = Math.max(10, Math.min(14, Math.round(vw * 0.032)));
 
+  // Hard ceiling for the panel body (everything below the ACTIONS header
+  // row). The buttons inside are scrollable past this height — so even
+  // if our budget math under-estimates the device chrome (Android edge-
+  // to-edge gesture nav, taller Samsung One UI bars, etc.), the user
+  // can still reach the EXIT ALL button by scrolling within the sheet.
+  const maxPanelBodyHeight = Math.max(
+    240,
+    vh
+      - Math.max(insets.top, 24)   // status bar
+      - 56                          // header chip row
+      - 130                         // capital card (compact)
+      - 56                          // positions header + scroll min slot
+      - 70                          // sheet header (grabber + ACTIONS)
+      - 16                          // sheet vertical padding
+      - Math.max(insets.bottom, 16), // gesture-nav inset (min 16)
+  );
+
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -786,14 +803,18 @@ export default function Home() {
               animated height. Animating just the clip height gives a
               pure pixel-by-pixel slide with zero opacity / fade. */}
           <Animated.View style={animatedBodyClipStyle} testID="actions-body">
-            <View
+            <ScrollView
               onLayout={(e) => {
                 const h = e.nativeEvent.layout.height;
                 if (h > 0 && Math.abs(bodyHeight.value - h) > 1) {
                   bodyHeight.value = h;
                 }
               }}
-              style={styles.sheetBody}
+              style={[styles.sheetBody, { maxHeight: maxPanelBodyHeight }]}
+              contentContainerStyle={{ paddingBottom: 4 }}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+              bounces={false}
             >
               <View style={styles.footerTop}>
                 <TouchableOpacity
@@ -872,7 +893,7 @@ export default function Home() {
               >
                 <Text style={[styles.exitText, { fontSize: exitTextSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>EXIT ALL POSITIONS</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </Animated.View>
         </View>
       </SafeAreaView>

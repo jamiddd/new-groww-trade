@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 5 verification of the bulletproof safeguard (ScrollView with maxHeight ceiling on the actions panel body) for the EXIT ALL POSITIONS visibility regression on real Android phones. Tested 4 viewports — 390x844 (iPhone), 412x915 (Pixel), 412x1000 (Tall Samsung), 360x740 (worst-case short Android Galaxy A series). ALL 4 PASS: exit-all-button getBoundingClientRect height equals the computed exitBtnHeight (56/60/66/49 px respectively), computed-style is `flex: 0 0 auto` (no shrink), and the button is FULLY within the viewport on every viewport — bottom edges 828/899/984/724 vs viewport heights 844/915/1000/740. No scroll was required on any tested viewport; the ScrollView's `maxHeight: maxPanelBodyHeight` ceiling provides defense-in-depth (the panel body would scroll only if device chrome under-estimated, e.g. by an actual gesture-nav bar present that this web preview doesn't include). The `[data-testid=\"actions-body\"]` slot exists and is the ScrollView container as expected. REGRESSION: exit-25 / exit-50 still render side-by-side with matching heights on every viewport (56/60/66/49 — heights match exit-all). EXPIRY POPOVER REGRESSION: header-expiry-button → expiry-sheet opens; outside-tap (10,10) dismisses cleanly. No deprecated packages newly introduced. Pre-existing `shadow*` react-native-web deprecation warning still present (unchanged from iteration_4).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "react-native-web shadow* style props (pre-existing, unchanged)",
+        "issue": "Console emits `\"shadow*\" style props are deprecated. Use \"boxShadow\".` from styles using shadowColor/shadowOpacity/shadowRadius/shadowOffset (sheetSurface, menuPanel, expiryPopover). Reference: /app/frontend/app/home.tsx:1327-1330, 1429-1431, 1494-1497. Low priority web-only warning."
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_5.json", "/app/test_reports/iteration_4.json"],
+  "action_items": [
+    "No action required for the EXIT ALL Android visibility issue. Web verification on all 4 target viewports (including 360x740 short Android) confirms EXIT ALL is fully visible inside the viewport. The maxPanelBodyHeight ScrollView safeguard is in place and will allow scrolling if the actual Android device chrome consumes more space than the web preview emulates. Ask the user to reload the app on their physical Android phone (clear app cache / force-stop + relaunch if needed) and retest — the fix is shipped.",
+    "(Optional, unchanged) Migrate remaining `shadow*` style props in home.tsx (sheetSurface, menuPanel, expiryPopover) to react-native-web's `boxShadow`."
+  ],
+  "critical_code_review_comments": [
+    "home.tsx is now 1547 lines — splitting into ActionsSheet / ExpiryPopover / styles modules is overdue but out of scope.",
+    "The two separate height-budget calculations (`panelBudget`/`exitFromBudget` lines 94-110 AND `maxPanelBodyHeight` lines 119-129) compute overlapping numbers from slightly different reservations. Consider consolidating into a single source of truth so the button-sizing and the ScrollView ceiling never drift apart."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped per request", "frontend": "100% — 4/4 viewports pass exit-all visibility; 4/4 pass exit-25/50 regression; 1/1 pass expiry popover open+dismiss"},
+  "seed_data_creation": "localStorage seeded with groww_access_token='FAKE_TOKEN_FOR_TEST' and actions_collapsed=false on the test origin. Backend returns 401 for /api/* (fake token, expected) — layout/visibility tests are unaffected because the ACTIONS panel renders regardless of API state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Per-viewport exit-all measurements (height / bottom / viewport_h): 390x844 → 56 / 828 / 844; 412x915 → 60 / 899 / 915; 412x1000 → 66 / 984 / 1000; 360x740 → 49 / 724 / 740. body height ≈ 280-358 px (well under maxPanelBodyHeight, so the ScrollView ceiling was not exercised). actions-body testID is on Animated.View, ScrollView is the only child — selector `[data-testid=\"actions-body\"]` still resolves. If the user reports EXIT ALL STILL invisible on their Android, ask for: (a) device model + Android version, (b) screen recording of the panel after tapping the ACTIONS grabber once, (c) whether a swipe-up gesture inside the panel reveals it (this would prove the ScrollView ceiling kicked in correctly — and tell us by how much the chrome math was off so it can be corrected).",
+  "rca_of_issue": "The iteration-4 web-only fix resolved the `flex: 0 1 0%` shrink-to-zero bug, but the user reported the button STILL not visible on a physical Android phone. Iteration-5's defensive change wraps the panel body in a ScrollView with `maxHeight: maxPanelBodyHeight` (lines 119-129, 806-818 in home.tsx), so that even if the panel's natural height exceeds available viewport space on a particular Android device (taller Samsung One UI bars, edge-to-edge gesture nav, etc.), the user can scroll within the panel to reach EXIT ALL. Web verification on the worst-case 360x740 viewport confirms the safeguard does NOT kick in unnecessarily on standard chrome (button is already fully visible with body_height=280 ≪ maxPanelBodyHeight). The safeguard is purely additive: visibility behavior identical on common viewports; scroll-to-reach available as a fallback on outlier device chrome. Reproduction on actual Android requires a real device; web preview cannot fully emulate Android system bar / gesture-nav inset behavior."
+}
