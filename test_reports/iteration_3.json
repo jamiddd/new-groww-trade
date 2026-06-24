@@ -1,0 +1,39 @@
+{
+  "summary": "Re-test of /home ACTIONS panel EXIT ALL button after main agent applied `flex: 0, alignSelf: 'stretch'` to styles.exitAll. REGRESSION IS NOT FIXED — exit-all-button still renders at height=0 across all three viewports (390x844, 412x915, 412x1000). Root cause confirmed via computed-CSS inspection: react-native-web translates `flex: 0` shorthand into CSS `flex: 0 1 0%` (i.e. flexGrow:0, flexShrink:1, flexBasis:0%), which diverges from React Native's native interpretation (flexBasis:'auto'). Because exit-all-button is a column-flex child of sheetBody and is the only sibling with flexShrink:1 (the buy grid row, exitRow, and footerTop all compute to `flex: 0 0 auto`), it absorbs the entire shrink and collapses to 0 height despite the inline `height: 60px`. The expiry popover regression test PASSES — header-expiry-button opens the expiry-sheet backdrop and outside-tap dismisses it. exit-25-button and exit-50-button still render at the same expected heights (56/60/66 on the three viewports).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "home.tsx — styles.exitAll (line 1398)",
+        "issue": "Applied fix `flex: 0, alignSelf: 'stretch'` does NOT prevent the collapse on web. Computed style of [data-testid='exit-all-button'] is `flex: 0 1 0%; flex-shrink: 1; flex-basis: 0%; height: 0px` (inline style declares `height: 60px` but it is overridden by flex-basis:0% in the column-flex sheetBody). Sibling rows compute to `flex: 0 0 auto` and keep their explicit heights. Measured exit-all-button.height = 0 px on 390x844, 412x915, 412x1000.",
+        "testID": "exit-all-button",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "react-native-web flex shorthand",
+        "issue": "`flex: 0` in StyleSheet.create does NOT map to RN's documented `{flexGrow:0, flexShrink:0, flexBasis:'auto'}` when rendered via react-native-web — it emits the CSS shorthand `flex: 0 1 0%` (i.e. flexShrink stays 1, flexBasis becomes 0%). This is the root cause of the unresolved EXIT ALL collapse on the web preview. The same code may behave differently on iOS/Android native. Reference: /app/frontend/app/home.tsx:1398."
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_3.json", "/app/test_reports/iteration_2.json"],
+  "action_items": [
+    "FIX (recommended, robust on web AND native): replace `flex: 0` in styles.exitAll with explicit longhand. In /app/frontend/app/home.tsx line 1398, change `exitAll: { backgroundColor: Colors.danger, marginTop: 4, flex: 0, alignSelf: 'stretch' }` to `exitAll: { backgroundColor: Colors.danger, marginTop: 4, flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'stretch' }`. The critical part is `flexShrink: 0` — without it, the parent column-flex squeezes the button regardless of the inline height.",
+    "ALTERNATIVE FIX (cleaner refactor): remove `flex: 1` from styles.exitBtn (line 1391-1396) and add `flex: 1` only to styles.exitPartial (which is already row-only and already declares flex:1). styles.exitAll then needs no flex override at all because the inherited cascade drops the offending flex:1.",
+    "After the fix, re-verify exit-all-button getBoundingClientRect().height ≈ exitBtnHeight (56 on 390x844, 60 on 412x915, 66 on 412x1000) and bottom ≤ vh - insets.bottom on all three viewports."
+  ],
+  "critical_code_review_comments": [
+    "Confirmed: home.tsx is 1527 lines — still over the 700-line guideline. Splitting the ACTIONS sheet, the expiry popover, and the styles object remains advisable.",
+    "RN-web pitfall: any `flex: <int>` shorthand used on standalone-height children of a flex container will silently shrink on the web. Audit other usages of `flex: 0` / `flex: 1` in styles where an inline `height` is also set."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "33% — only 1/3 of the regression checks pass. exit-25/50 heights and expiry popover open/dismiss pass; exit-all height is still 0 on all 3 viewports."},
+  "seed_data_creation": "localStorage seeded on origin: groww_access_token='FAKE_TOKEN_FOR_TEST', actions_collapsed=false. Backend (HTTP DigitalOcean) returns Cloudflare error from HTTPS preview, so positions/expiries are empty — expected and does not affect the layout test.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After the next fix attempt, re-measure: page.evaluate retrieves exit-all-button.getBoundingClientRect() and document.querySelector('[data-testid=exit-all-button]').computedStyle. The target is computed `flex-shrink: 0` (or the flex shorthand should not contain `1` in the shrink slot). Verify on viewports 390x844, 412x915, 412x1000. The expiry popover test is already passing — no need to retest unless touched.",
+  "rca_of_issue": "BUG: EXIT ALL POSITIONS button collapses to height=0 on the web preview because react-native-web emits `flex: 0 1 0%` for the StyleSheet shorthand `flex: 0` (the CSS shorthand default, NOT React Native's documented `{0,0,auto}` interpretation). The parent sheetBody is a column flex container; exit-all is its only child with `flex-shrink: 1`, so any height pressure collapses it entirely. The inline `height: 60px` cannot win against `flex-basis: 0%` + `flex-shrink: 1`. Reproduction: open /home (seed localStorage to bypass login), measure [data-testid='exit-all-button'].getBoundingClientRect().height — observed 0 on all three target viewports. Mitigation: use explicit `flexShrink: 0, flexGrow: 0, flexBasis: 'auto'` instead of the `flex: 0` shorthand, OR refactor styles.exitBtn to drop the inherited `flex: 1` and only opt-in via exitPartial."
+}

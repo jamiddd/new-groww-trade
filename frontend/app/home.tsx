@@ -1395,7 +1395,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   exitPartial: { flex: 1, backgroundColor: Colors.dangerDark },
-  exitAll: { backgroundColor: Colors.danger, marginTop: 4 },
+  exitAll: { backgroundColor: Colors.danger, marginTop: 4, flex: 0, alignSelf: "stretch" },
   exitText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", fontSize: 12, letterSpacing: 0.6 },
 
   menuBackdrop: { flex: 1, backgroundColor: "transparent" },
