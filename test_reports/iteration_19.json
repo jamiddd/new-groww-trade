@@ -1,0 +1,52 @@
+{
+  "summary": "Iter_19 backend-only verification of the defensive candle-context timeout in /app/backend/server.py around line 2259. STATIC CHECKS (AST + regex) PASSED: (a) `asyncio` is imported at the top of server.py (line 13); (b) the dry-run branch of `place_preset_order` wraps `_candle_context_last_hour(...)` in `asyncio.wait_for(..., timeout=8.0)`; (c) the surrounding try/except catches both `asyncio.TimeoutError` and generic `Exception`, with both fallback paths assigning `ctx = {\"below_pct\": None, \"ema9\": None}`; (d) `logger.warning` calls mention 'candle context ... timed out' for the timeout branch. FUNCTIONAL REGRESSION PASSED: POST /api/orders/place-preset (demo token) for NIFTY `breakout_chaser_lmt` and `steady_lmt` both returned 200 with dry_run=true, lots>=1, quantity==lots*lot_size, order.order_type='LIMIT', protective_preview block intact (entry_price/sl_price/tp_price/sl_pct/tp_pct), and the optional `below_price_pct` + `ema9` keys present (None in demo path, as expected). Each request completed in ~110ms — well below the 8s timeout cap and Cloudflare's 100s edge limit. REGRESSION SUITE: ran test_mcx_commodity_fix.py + test_iter17_mcx_exit_fix.py + test_iter18_segment_for_ltp.py alongside the new iter_19 files → 30/30 passing across 3 consecutive runs. NAMING NOTE for main agent: the review_request referenced preset keys `breakout_call_lmt` and `steady_call_lmt`, but the actual keys defined in server.py:128-130 are `breakout_chaser_lmt` and `steady_lmt` (the *_call_lmt names do not exist). Functional test was updated to use the real keys.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/orders/place-preset",
+        "issue": "review_request referenced non-existent preset keys `breakout_call_lmt` / `steady_call_lmt`. Actual keys in server.py:128/130 are `breakout_chaser_lmt` and `steady_lmt`. Worth aligning naming or documenting the mapping so future testing agents don't waste a roundtrip."
+      },
+      {
+        "endpoint": "candle context (advisory)",
+        "issue": "Pre-existing inside `_candle_context_last_hour` (server.py:1442) — the function still makes a single sync `api_.get_historical_candle_data` call via `_call_blocking`. The new outer `asyncio.wait_for(timeout=8.0)` cancels the awaitable but the underlying sync SDK call running in a thread will keep executing until it returns (Python can't pre-empt threads). This is fine for the user-facing 520 fix (the request returns in 8s) but the thread can pile up under sustained Groww-historical slowness. Future hardening could add an httpx-level read timeout inside the SDK wrapper."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter19_candle_context_timeout.py",
+    "/app/backend/tests/test_iter19_candle_context_timeout_functional.py",
+    "/app/backend/tests/test_mcx_commodity_fix.py",
+    "/app/backend/tests/test_iter17_mcx_exit_fix.py",
+    "/app/backend/tests/test_iter18_segment_for_ltp.py",
+    "/app/test_reports/pytest/iter19_results.xml"
+  ],
+  "action_items": [
+    "(Optional, defense-in-depth) Wrap the LIVE order placement at server.py:2306 (`api_.place_order` via `_call_blocking`) in a similar asyncio.wait_for + try/except with a sensible cap (e.g. 30-60s) so a hanging Groww place_order call also returns a clean 502 instead of a CF 520. Out-of-scope for iter_19 but the same RCA pattern applies.",
+    "(Optional) Add an httpx-level read timeout inside `_call_blocking`/GrowwAPI SDK wrapper. Right now `asyncio.wait_for` cancels the awaitable but the thread keeps running until the sync SDK call returns — under sustained Groww slowness this could leak threadpool workers.",
+    "(Naming) Either rename presets to `breakout_call_lmt`/`steady_call_lmt` to match the review_request shorthand, OR update internal docs to use the actual keys (`breakout_chaser_lmt`, `steady_lmt`)."
+  ],
+  "critical_code_review_comments": [
+    "iter_19 fix is correctly applied: asyncio.wait_for(_candle_context_last_hour(...), timeout=8.0) at server.py:2264-2272, with `except asyncio.TimeoutError` (2273) and `except Exception` (2279) both falling back to ctx = {below_pct: None, ema9: None}. Both fallback paths log a warning with relevant context. ✓",
+    "server.py is now 2641 lines (was 2624 in iter_18). Still warrants splitting into modules (presets, orders, market_data, instruments) — flagged in iter_17/18, not addressed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter19_candle_context_timeout.py (new — 4 AST/regex static checks)",
+    "/app/backend/tests/test_iter19_candle_context_timeout_functional.py (new — 2 parametrized functional checks against the live demo endpoint)"
+  ],
+  "success_rate": {
+    "backend": "100% (30/30 across 3 consecutive runs — 4 iter19 static + 2 iter19 functional + 4 iter18 static + 12 iter17 + 8 mcx_commodity)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "None — used existing demo /api/auth/login flow.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter_19 fix is a defensive 8-second cap on the advisory candle-context fetch inside the dry-run branch of /api/orders/place-preset. The candle context is purely cosmetic (EMA9 + below-price% chips on the confirmation dialog) so degrading both fields to None is acceptable. Verified via AST static checks + functional dry-run regression on NIFTY breakout_chaser_lmt and steady_lmt with the demo token — both return 200 in ~110ms with order.order_type=LIMIT and full protective_preview. CANNOT exercise the actual timeout path here (demo Groww does not hang on historical-candle calls). User must redeploy the droplet to consume iter_16/17/18/19 fixes against the live MCX-fixed Groww token. If the user reports the 520 again post-deploy, suspect the LIVE place_order call itself hanging (server.py:2306) — see action_items[0] for the suggested follow-up wrapper.",
+  "rca_of_issue": "Root cause (already mitigated by main agent in iter_19): the dry-run branch of POST /api/orders/place-preset calls `_candle_context_last_hour()` which itself awaits `_call_blocking(api_.get_historical_candle_data, ...)` (server.py:1476). When Groww's historical-candle endpoint stalls or returns very slowly, the whole dry-run blocked indefinitely. Cloudflare's edge enforces a ~100s response deadline so the LIVE droplet returned a 520 'invalid or incomplete response' to the user. Mitigation: wrap the candle-context await in `asyncio.wait_for(..., timeout=8.0)` and catch both TimeoutError and generic Exception, falling back to ctx={below_pct:None, ema9:None}. The dry-run response shape, sizing, and protective_preview are unchanged — only the two advisory fields can degrade to None when Groww's historical endpoint is slow. Reproduction in this preview env is not possible (demo Groww doesn't stall); verified statically via AST + functionally via demo dry-run latency check (~110ms, well under 8s)."
+}

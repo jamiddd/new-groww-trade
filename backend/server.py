@@ -2256,12 +2256,29 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         )
         # Time-in-range + 9 EMA context — only fetched on dry-run (the
         # user is idling on the confirmation dialog, latency is fine here).
-        ctx = await _candle_context_last_hour(
-            api_,
-            trading_symbol=pick["trading_symbol"],
-            exchange=payload.exchange,
-            current_price=float(pick.get("ltp") or 0),
-        )
+        # WRAPPED in a hard timeout: if Groww's historical-candle API hangs
+        # the whole dry-run would exceed Cloudflare's 100s edge timeout
+        # and the user would see a 520. The context is purely advisory
+        # (EMA/below-price%) so degrading to None is acceptable.
+        try:
+            ctx = await asyncio.wait_for(
+                _candle_context_last_hour(
+                    api_,
+                    trading_symbol=pick["trading_symbol"],
+                    exchange=payload.exchange,
+                    current_price=float(pick.get("ltp") or 0),
+                ),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "candle context timed out (>8s) for %s/%s — skipping",
+                payload.exchange, pick.get("trading_symbol"),
+            )
+            ctx = {"below_pct": None, "ema9": None}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("candle context errored: %s — skipping", exc)
+            ctx = {"below_pct": None, "ema9": None}
         return {
             "dry_run": True,
             "preset": preset_doc,
