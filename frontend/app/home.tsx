@@ -1146,6 +1146,8 @@ function MenuItem({
   destructive?: boolean;
   testID?: string;
 }) {
+  const { Colors } = useTheme();
+  const styles = useMemo(() => mkStyles(Colors), [Colors]);
   return (
     <TouchableOpacity style={styles.menuItem} onPress={onPress} testID={testID}>
       <Text style={[styles.menuItemText, destructive && { color: Colors.danger }]}>{label}</Text>
@@ -1198,7 +1200,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     borderRadius: 10,
     padding: 14,
     marginBottom: 14,
-    backgroundColor: "#FFF",
+    backgroundColor: Colors.surface,
   },
   dotRow: { flexDirection: "row", alignItems: "flex-end", marginVertical: 4 },
   dotLabel: { fontFamily: FONT, fontSize: 13, color: Colors.text },
@@ -1296,10 +1298,10 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   // top corners, grab handle, hairline divider, and an upward elevation
   // shadow so the sheet "lifts" off the scroll content above.
   sheetSafeBg: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.surface,
   },
   sheetSurface: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderTopWidth: 1,
@@ -1399,7 +1401,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     marginTop: 48,
     marginRight: 12,
     marginLeft: "auto",
-    backgroundColor: "#FFF",
+    backgroundColor: Colors.surface,
     borderRadius: 8,
     paddingVertical: 6,
     shadowColor: "#000",
@@ -1415,7 +1417,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
 
   bottomSheetWrap: { position: "absolute", left: 0, right: 0, bottom: 0 },
   bottomSheet: {
-    backgroundColor: "#FFF",
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 20,
@@ -1463,7 +1465,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     position: "absolute",
     left: 12,
     right: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.surface,
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 6,
@@ -1478,7 +1480,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     top: -6,
     width: 12,
     height: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.surface,
     transform: [{ rotate: "45deg" }],
   },
   expiryPillsRow: {
@@ -1493,7 +1495,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#EFEFEF",
+    backgroundColor: Colors.pillBg,
   },
   expiryPillActive: {
     backgroundColor: Colors.primary,

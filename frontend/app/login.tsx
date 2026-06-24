@@ -575,7 +575,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: Colors.text,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.surface,
   },
   inputWithIcon: {
     flexDirection: "row",
@@ -583,7 +583,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 10,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.surface,
   },
   eyeIconBtn: { position: "absolute", right: 12, top: 0, bottom: 0, justifyContent: "center" },
 
@@ -675,7 +675,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
   sheetWrap: { position: "absolute", left: 0, right: 0, bottom: 0 },
   sheet: {
-    backgroundColor: "#FFF",
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 20,

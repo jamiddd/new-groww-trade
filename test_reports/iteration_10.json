@@ -1,0 +1,42 @@
+{
+  "summary": "Frontend-only re-test of theme fixes from iteration_9. ALL THREE CRITICAL REGRESSIONS ARE FIXED. (1) Kebab menu (header-menu-button) on /home in BOTH light and dark mode opens cleanly with zero page errors — `kebab-menu`, `menu-history`, `menu-settings`, `menu-refresh`, `menu-disconnect` all render. The 'styles is not defined' ReferenceError is gone; MenuItem now consumes its own useTheme()/useMemo(mkStyles). (2) Dark mode surfaces on /home are now correctly dark: Capital card (Colors.surface = #0A0A0A), ACTIONS bottom panel (#0A0A0A), kebab dropdown (#0A0A0A) — verified visually via screenshots. (3) Max Loss BottomSheet (and by extension all BottomSheet consumers) now renders dark in dark mode — measured `getComputedStyle` on `[data-testid=max-loss-sheet]` returns rgb(10,10,10). Expiry popover (header-expiry-button → expiry-sheet) themes correctly with dark popover + Colors.pillBg pills with readable text. Light mode regression check passes: /home, kebab menu, and Settings all render crisp white. Zero pageerrors throughout login → settings(dark) → home → kebab → expiry → max-loss → settings(light) → home → kebab flow. ONE MINOR LEFTOVER: `BottomSheet.tsx:108` still has `sheetBg: { backgroundColor: '#FFFFFF' }` (this is the SafeAreaView edges=['bottom'] strip wrapping every BottomSheet — invisible in the 390x844 web preview viewport without iOS safe-area inset, but on real iOS devices in dark mode it will render a white strip below the sheet). Deprecated `shadow*` style props warning still fires (from iter_9 — separate task).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "src/components/BottomSheet.tsx", "issue": "Line 108 still has `sheetBg: { backgroundColor: '#FFFFFF' }` — the SafeAreaView bottom-edge strip wrapping every BottomSheet stays white in dark mode. Spec note explicitly said this was changed to Colors.surface but the literal hex is still present. Will only be visible on devices with non-zero bottom safe-area inset (real iPhone notch devices); the 390x844 web preview has zero bottom inset so it's not visible in screenshots. Fix: change to `backgroundColor: Colors.surface`.", "testID": "(all BottomSheet consumers)", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "deprecated shadow* style props", "issue": "Warning still fires during render: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Multiple StyleSheet entries in home.tsx (sheetSurface, menuPanel, toast, expiryPopover) still use shadowColor/shadowOpacity/shadowRadius/shadowOffset. Reference: /app/frontend/app/home.tsx (multiple sites). Carried over from iteration_9 — not part of this iteration's fix scope."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/t1_landing.png",
+    "/tmp/t1_settings_light.png",
+    "/tmp/t1_settings_dark.png",
+    "/tmp/t1_home_dark.png",
+    "/tmp/t1_kebab_dark.png",
+    "/tmp/t1_expiry_dark.png",
+    "/tmp/t1_maxloss_dark.png",
+    "/tmp/t1_home_light.png",
+    "/tmp/t1_kebab_light.png"
+  ],
+  "action_items": [
+    "FIX MINOR: Replace `backgroundColor: '#FFFFFF'` at /app/frontend/src/components/BottomSheet.tsx:108 with `Colors.surface`. The spec said this was already changed but the literal hex is still in the file. Will be visible as a white strip below the sheet on iOS devices with bottom safe-area inset.",
+    "(Carry-over from iter_9, separate task): Replace deprecated `shadow*` style props with `boxShadow` to silence the runtime warning."
+  ],
+  "critical_code_review_comments": [
+    "MenuItem fix at home.tsx:1138-1156 is structurally correct — it now self-consumes useTheme() + useMemo(mkStyles) instead of relying on Home's closure. This is the simplest and most maintainable fix (no prop drilling).",
+    "home.tsx mkStyles: all the previously-flagged literal #FFF/#FFFFFF backgrounds have been migrated to Colors.surface / Colors.pillBg. The remaining '#FFF'/'#FFFFFF' references in the file are all FOREGROUND colors (text/icons on colored buttons, switch thumbColor) which is correct.",
+    "BottomSheet.tsx line 108 is the only literal '#FFFFFF' surface I could find that should have been migrated but wasn't. Probably an oversight (the spec note explicitly mentions BottomSheet was fixed).",
+    "Default theme mode is now 'system' per the spec — testing in an environment whose system colorScheme = light gives a white initial render, which matches user expectation. No regression."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "98% — all 3 iteration-9 critical regressions are fixed. Only a single low-priority leftover #FFFFFF in BottomSheet.tsx:108 (invisible in web preview viewport) and the unrelated carry-over shadow* deprecation warning."},
+  "seed_data_creation": "None. Logged in with demo / demo (Groww practice/demo path).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Theme switching is fully functional. demo/demo login works on the deployed env. Test flow: /login (demo/demo) → /settings (tap setting-theme-dark) → /home → tap header-menu-button (kebab) → confirm dropdown opens with menu-history/menu-settings/menu-refresh/menu-disconnect. All sheet surfaces (max-loss-sheet, expiry-sheet, single-position-sheet, order-confirm-sheet, etc.) now theme via Colors.surface = #0A0A0A in dark. One leftover: BottomSheet.tsx:108 still hardcodes white sheetBg (low priority, only visible on iOS bottom-safe-area inset).",
+  "rca_of_issue": "Iter_9 RCA confirmed and fixed: (a) MenuItem closure crash — resolved by making MenuItem self-sufficient (uses its own useTheme + useMemo(mkStyles), no longer depends on Home's local `styles`). (b) Literal #FFF surfaces in mkStyles factories — successfully migrated to Colors.surface / Colors.pillBg throughout home.tsx, login.tsx, preset.tsx. Verified visually + via getComputedStyle assertion."
+}

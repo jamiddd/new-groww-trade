@@ -438,7 +438,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
   sheetWrap: { position: "absolute", left: 0, right: 0, bottom: 0 },
   sheet: {
-    backgroundColor: "#FFF",
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 20,

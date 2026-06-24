@@ -107,7 +107,7 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "transparent" },
   sheetBg: { backgroundColor: "#FFFFFF" },
   sheet: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 1,
