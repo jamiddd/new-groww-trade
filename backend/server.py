@@ -138,6 +138,9 @@ class Settings(BaseModel):
     save_last_underlying: bool = True
     last_underlying: Optional[str] = None
     last_underlying_expiry: Optional[str] = None  # YYYY-MM-DD
+    # Practice mode: every BUY uses exactly 1 lot regardless of the preset's
+    # position-sizing %. Lets the user test the flow with minimal capital risk.
+    practice_mode: bool = False
 
 
 class PlacePresetOrderRequest(BaseModel):
@@ -1557,6 +1560,13 @@ def _fallback_pick_from_master(
 
 @api.post("/orders/place-preset")
 async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depends(require_token)):
+    # Pull the user-level settings once up front. We need `practice_mode`
+    # which, when true, overrides whatever position-sizing % the preset
+    # carries and clamps the order to exactly 1 lot — a safety hatch for
+    # users who want to dry-run the full flow with minimum capital risk.
+    settings_doc = await db.settings.find_one({"_id": "user"}, {"_id": 0}) or {}
+    practice_mode = bool(settings_doc.get("practice_mode"))
+
     # Demo mode: stateful — actually mutate db.demo_state
     if _is_demo(token):
         # Compute deterministic-ish demo strike + lot info before deciding
@@ -1592,6 +1602,8 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         lot = 75 if u == "NIFTY" else (35 if u == "BANKNIFTY" else 50)
         contract_cost = ltp * lot
         lots = math.floor((payload.capital * sizing) / contract_cost) if contract_cost > 0 else 0
+        if practice_mode:
+            lots = 1
         qty = lots * lot
         order_type_str = preset_doc.get("order_type", "MARKET")
 
@@ -1842,6 +1854,8 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             }
         raise HTTPException(status_code=400, detail="No live LTP available for the picked strike — refusing to size.")
     lots = math.floor(risk_capital / contract_cost) if contract_cost > 0 else 0
+    if practice_mode:
+        lots = 1
     quantity = lots * lot_size
 
     # Refuse to size beyond capital. For dry-run we still render the preview

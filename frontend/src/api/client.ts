@@ -24,6 +24,7 @@ export type AppSettings = {
   save_last_underlying: boolean;
   last_underlying?: string | null;
   last_underlying_expiry?: string | null;
+  practice_mode: boolean;
 };
 
 const TOKEN_KEY = "groww_access_token";

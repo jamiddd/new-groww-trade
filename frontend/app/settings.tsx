@@ -97,6 +97,13 @@ export default function SettingsScreen() {
           onChange={(v) => update({ save_last_underlying: v })}
           testID="setting-save-underlying"
         />
+        <SettingRow
+          title="Practice mode"
+          desc="Every BUY uses exactly 1 lot regardless of position sizing — minimal capital risk while you learn the flow."
+          value={!!s.practice_mode}
+          onChange={(v) => update({ practice_mode: v })}
+          testID="setting-practice-mode"
+        />
 
         <TouchableOpacity
           style={styles.logoutBtn}
