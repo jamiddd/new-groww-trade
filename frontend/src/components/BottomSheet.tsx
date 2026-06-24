@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 
 import { Colors } from "@/src/theme";
@@ -68,7 +68,17 @@ export default function BottomSheet({ visible, onClose, children, avoidKeyboard 
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.root}>
+      {/*
+        On Android, <Modal> mounts its children into a separate native
+        window — the GestureHandlerRootView we installed at the app root
+        (_layout.tsx) does NOT cover this subtree. Without a local
+        GestureHandlerRootView here, drag-to-dismiss gestures inside the
+        sheet are completely dead on Android (silently works on iOS where
+        modals stay in the same view hierarchy). This wrapper is a
+        documented requirement of react-native-gesture-handler when
+        gestures live inside a Modal.
+      */}
+      <GestureHandlerRootView style={styles.root}>
         <Pressable
           style={styles.backdrop}
           onPress={onClose}
@@ -84,7 +94,7 @@ export default function BottomSheet({ visible, onClose, children, avoidKeyboard 
             </SafeAreaView>
           </Animated.View>
         </GestureDetector>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
