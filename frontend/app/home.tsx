@@ -11,9 +11,8 @@ import {
   Pressable,
   Switch,
   TextInput,
-  useWindowDimensions,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import Animated, {
@@ -71,62 +70,6 @@ const formatUSD = (n: number, rate: number) =>
 
 export default function Home() {
   const router = useRouter();
-  const { width: vw, height: vh } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-
-  // ─── Viewport-driven sizing for the buy/exit buttons ─────────────────
-  // We start from the original viewport ratios (designed against the
-  // iPhone 14 Pro ≈ 390 × 844) but then constrain them to a *panel
-  // budget* — i.e. the max height the actions panel may consume without
-  // pushing the EXIT ALL button below the visible viewport (which can
-  // happen on tall Android devices with a gesture nav bar).
-  //
-  // Panel layout (vertical stack):
-  //   sheet header  (grabber + ACTIONS label, ≈ 70 px)
-  //   footer top    (Set Max Loss pill + CE/PE toggle, ≈ 46 px)
-  //   buy grid      (2 rows × buyBtnHeight + 4 px gap)
-  //   exit row      (1 row × exitBtnHeight + 4 px top margin)
-  //   exit all      (1 row × exitBtnHeight + 4 px top margin)
-  //   surface pad   (paddingBottom 8 px + safe-area bottom inset)
-  //
-  // Reserve at least 220 px of viewport above the panel for the header,
-  // capital card, and position list scroll area.
-  const reservedAbove = 220; // header + capital card + min scroll area
-  const panelChrome = 70 /* sheet header */ + 46 /* footer top */ + 8 /* pad */ + 8 /* extra slack */;
-  const panelBudget = Math.max(
-    260,
-    vh - reservedAbove - panelChrome - Math.max(insets.bottom, 8) - Math.max(insets.top, 0),
-  );
-  // The grid + exit rows + exit all (5 buttons worth of height
-  // contributions) must all fit inside panelBudget. We weight buys
-  // ~1.3× the exit buttons.
-  //   2 * buyH + 2 * exitH + 4*4 (gaps) ≤ panelBudget
-  //   buyH = 1.3 * exitH
-  //   ⇒ exitH ≤ (panelBudget - 16) / 4.6
-  const exitFromBudget = Math.floor((panelBudget - 16) / 4.6);
-  const buyFromBudget = Math.floor(exitFromBudget * 1.3);
-
-  const buyBtnHeight = Math.max(56, Math.min(96, Math.min(Math.round(vh * 0.085), buyFromBudget)));
-  const exitBtnHeight = Math.max(44, Math.min(72, Math.min(Math.round(vh * 0.066), exitFromBudget)));
-  const buyTextSize = Math.max(11, Math.min(15, Math.round(vw * 0.034)));
-  const exitTextSize = Math.max(10, Math.min(14, Math.round(vw * 0.032)));
-
-  // Hard ceiling for the panel body (everything below the ACTIONS header
-  // row). The buttons inside are scrollable past this height — so even
-  // if our budget math under-estimates the device chrome (Android edge-
-  // to-edge gesture nav, taller Samsung One UI bars, etc.), the user
-  // can still reach the EXIT ALL button by scrolling within the sheet.
-  const maxPanelBodyHeight = Math.max(
-    240,
-    vh
-      - Math.max(insets.top, 24)   // status bar
-      - 56                          // header chip row
-      - 130                         // capital card (compact)
-      - 56                          // positions header + scroll min slot
-      - 70                          // sheet header (grabber + ACTIONS)
-      - 16                          // sheet vertical padding
-      - Math.max(insets.bottom, 16), // gesture-nav inset (min 16)
-  );
 
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -348,9 +291,6 @@ export default function Home() {
   // — strictly translate the layout.
   const bodyHeight = useSharedValue(0);
   const expandProgress = useSharedValue(actionsCollapsed ? 0 : 1);
-  // Captured at gesture start so the user can drag the sheet smoothly
-  // from wherever it currently sits (open, closed, or half-dragged).
-  const dragBaseline = useSharedValue(0);
 
   useEffect(() => {
     expandProgress.value = withTiming(actionsCollapsed ? 0 : 1, { duration: 240 });
@@ -373,38 +313,22 @@ export default function Home() {
 
   // Memoise the gesture so a new instance isn't constructed on every
   // render (which would invalidate the native handler registration and
-  // could intermittently swallow events).
-  const actionsPanGesture = useMemo(() => {
-    return Gesture.Pan()
-      .activeOffsetY([-6, 6])
-      .onStart(() => {
-        "worklet";
-        dragBaseline.value = expandProgress.value;
-      })
-      .onChange((e) => {
-        "worklet";
-        if (bodyHeight.value <= 0) return;
-        // Dragging UP (negative translationY) should EXPAND → progress↑.
-        // Dragging DOWN (positive translationY) should COLLAPSE → progress↓.
-        const delta = -e.translationY / bodyHeight.value;
-        const next = dragBaseline.value + delta;
-        expandProgress.value = Math.max(0, Math.min(1, next));
-      })
-      .onEnd((e) => {
-        "worklet";
-        // Snap to the nearest end-stop, with velocity bias so a quick
-        // flick wins over the strict midpoint check.
-        const flickUp = e.velocityY < -500;
-        const flickDown = e.velocityY > 500;
-        let target: 0 | 1;
-        if (flickUp) target = 1;
-        else if (flickDown) target = 0;
-        else target = expandProgress.value >= 0.5 ? 1 : 0;
-        expandProgress.value = withTiming(target, { duration: 200 });
-        // Mirror the resolved state into React land + AsyncStorage.
-        runOnJS(setActionsCollapsedPersistent)(target === 0);
-      });
-  }, [setActionsCollapsedPersistent, expandProgress, bodyHeight, dragBaseline]);
+  // could intermittently swallow events). Snap-only: a swipe up opens,
+  // a swipe down closes — no live drag tracking.
+  const actionsPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-12, 12])
+        .onEnd((e) => {
+          "worklet";
+          if (e.translationY < -20 || e.velocityY < -500) {
+            runOnJS(setActionsCollapsedPersistent)(false);
+          } else if (e.translationY > 20 || e.velocityY > 500) {
+            runOnJS(setActionsCollapsedPersistent)(true);
+          }
+        }),
+    [setActionsCollapsedPersistent],
+  );
 
   // Live LTP refresh inside the open confirmation dialog: every 3 s, while
   // a preset is queued for confirmation and we're not actively placing the
@@ -775,7 +699,7 @@ export default function Home() {
           top corners, and an upward elevation shadow. Stays in layout
           so the ScrollView above naturally insets around it. */}
       <SafeAreaView edges={["bottom"]} style={styles.sheetSafeBg}>
-        <View style={[styles.sheetSurface, { paddingBottom: Math.max(8, insets.bottom > 0 ? 8 : 12) }]}>
+        <View style={styles.sheetSurface}>
           <GestureDetector gesture={actionsPanGesture}>
             <View>
               <TouchableOpacity
@@ -803,18 +727,14 @@ export default function Home() {
               animated height. Animating just the clip height gives a
               pure pixel-by-pixel slide with zero opacity / fade. */}
           <Animated.View style={animatedBodyClipStyle} testID="actions-body">
-            <ScrollView
+            <View
               onLayout={(e) => {
                 const h = e.nativeEvent.layout.height;
                 if (h > 0 && Math.abs(bodyHeight.value - h) > 1) {
                   bodyHeight.value = h;
                 }
               }}
-              style={[styles.sheetBody, { maxHeight: maxPanelBodyHeight }]}
-              contentContainerStyle={{ paddingBottom: 4 }}
-              showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
-              bounces={false}
+              style={styles.sheetBody}
             >
               <View style={styles.footerTop}>
                 <TouchableOpacity
@@ -848,23 +768,13 @@ export default function Home() {
                   return (
                     <TouchableOpacity
                       key={p.key}
-                      style={[
-                        styles.buyBtn,
-                        { backgroundColor: isLmt ? Colors.primaryDark : Colors.primary, height: buyBtnHeight },
-                      ]}
+                      style={[styles.buyBtn, { backgroundColor: isLmt ? Colors.primaryDark : Colors.primary }]}
                       onPress={() => onPresetPress(p)}
                       onLongPress={() => router.push(`/preset?key=${p.key}`)}
                       delayLongPress={400}
                       testID={`buy-button-${p.key}`}
                     >
-                      <Text
-                        style={[styles.buyText, { fontSize: buyTextSize }]}
-                        numberOfLines={2}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.7}
-                      >
-                        {dynamicLabel}
-                      </Text>
+                      <Text style={styles.buyText}>{dynamicLabel}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -872,28 +782,28 @@ export default function Home() {
 
               <View style={styles.exitRow}>
                 <TouchableOpacity
-                  style={[styles.exitBtn, styles.exitPartial, { height: exitBtnHeight }]}
+                  style={[styles.exitBtn, styles.exitPartial]}
                   onPress={() => onExitPress(25)}
                   testID="exit-25-button"
                 >
-                  <Text style={[styles.exitText, { fontSize: exitTextSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>EXIT 25% POSITIONS</Text>
+                  <Text style={styles.exitText}>EXIT 25% POSITIONS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.exitBtn, styles.exitPartial, { height: exitBtnHeight }]}
+                  style={[styles.exitBtn, styles.exitPartial]}
                   onPress={() => onExitPress(50)}
                   testID="exit-50-button"
                 >
-                  <Text style={[styles.exitText, { fontSize: exitTextSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>EXIT 50% POSITIONS</Text>
+                  <Text style={styles.exitText}>EXIT 50% POSITIONS</Text>
                 </TouchableOpacity>
               </View>
               <TouchableOpacity
-                style={[styles.exitBtn, styles.exitAll, { height: exitBtnHeight }]}
+                style={[styles.exitBtn, styles.exitAll]}
                 onPress={() => onExitPress(100)}
                 testID="exit-all-button"
               >
-                <Text style={[styles.exitText, { fontSize: exitTextSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>EXIT ALL POSITIONS</Text>
+                <Text style={styles.exitText}>EXIT ALL POSITIONS</Text>
               </TouchableOpacity>
-            </ScrollView>
+            </View>
           </Animated.View>
         </View>
       </SafeAreaView>
@@ -1397,25 +1307,18 @@ const styles = StyleSheet.create({
 
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
   buyBtn: {
-    // Robust 2-column layout: flexBasis seeds each button at ~48% of the
-    // row, flexGrow lets it stretch to consume the remaining 4 px gap.
-    // Height is set inline from a viewport-driven value in the component.
-    flexBasis: "48%",
-    flexGrow: 1,
+    width: "49.4%",
+    height: 70,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 8,
     borderRadius: 2,
   },
-  buyText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", textAlign: "center", letterSpacing: 0.6 },
+  buyText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", textAlign: "center", fontSize: 12, letterSpacing: 0.6 },
   exitRow: { flexDirection: "row", gap: 4, marginTop: 4 },
-  exitBtn: {
-    borderRadius: 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  exitBtn: { height: 56, borderRadius: 2, alignItems: "center", justifyContent: "center" },
   exitPartial: { flex: 1, backgroundColor: Colors.dangerDark },
-  exitAll: { backgroundColor: Colors.danger, marginTop: 4, alignSelf: "stretch" },
+  exitAll: { backgroundColor: Colors.danger, marginTop: 4 },
   exitText: { fontFamily: FONT, color: "#FFF", fontWeight: "bold", fontSize: 12, letterSpacing: 0.6 },
 
   menuBackdrop: { flex: 1, backgroundColor: "transparent" },
