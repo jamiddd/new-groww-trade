@@ -289,6 +289,9 @@ export default function Home() {
   // — strictly translate the layout.
   const bodyHeight = useSharedValue(0);
   const expandProgress = useSharedValue(actionsCollapsed ? 0 : 1);
+  // Captured at gesture start so the user can drag the sheet smoothly
+  // from wherever it currently sits (open, closed, or half-dragged).
+  const dragBaseline = useSharedValue(0);
 
   useEffect(() => {
     expandProgress.value = withTiming(actionsCollapsed ? 0 : 1, { duration: 240 });
@@ -312,19 +315,37 @@ export default function Home() {
   // Memoise the gesture so a new instance isn't constructed on every
   // render (which would invalidate the native handler registration and
   // could intermittently swallow events).
-  const actionsPanGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetY([-12, 12])
-        .onEnd((e) => {
-          if (e.translationY < -20 || e.velocityY < -500) {
-            runOnJS(setActionsCollapsedPersistent)(false);
-          } else if (e.translationY > 20 || e.velocityY > 500) {
-            runOnJS(setActionsCollapsedPersistent)(true);
-          }
-        }),
-    [setActionsCollapsedPersistent],
-  );
+  const actionsPanGesture = useMemo(() => {
+    return Gesture.Pan()
+      .activeOffsetY([-6, 6])
+      .onStart(() => {
+        "worklet";
+        dragBaseline.value = expandProgress.value;
+      })
+      .onChange((e) => {
+        "worklet";
+        if (bodyHeight.value <= 0) return;
+        // Dragging UP (negative translationY) should EXPAND → progress↑.
+        // Dragging DOWN (positive translationY) should COLLAPSE → progress↓.
+        const delta = -e.translationY / bodyHeight.value;
+        const next = dragBaseline.value + delta;
+        expandProgress.value = Math.max(0, Math.min(1, next));
+      })
+      .onEnd((e) => {
+        "worklet";
+        // Snap to the nearest end-stop, with velocity bias so a quick
+        // flick wins over the strict midpoint check.
+        const flickUp = e.velocityY < -500;
+        const flickDown = e.velocityY > 500;
+        let target: 0 | 1;
+        if (flickUp) target = 1;
+        else if (flickDown) target = 0;
+        else target = expandProgress.value >= 0.5 ? 1 : 0;
+        expandProgress.value = withTiming(target, { duration: 200 });
+        // Mirror the resolved state into React land + AsyncStorage.
+        runOnJS(setActionsCollapsedPersistent)(target === 0);
+      });
+  }, [setActionsCollapsedPersistent, expandProgress, bodyHeight, dragBaseline]);
 
   // Live LTP refresh inside the open confirmation dialog: every 3 s, while
   // a preset is queued for confirmation and we're not actively placing the
