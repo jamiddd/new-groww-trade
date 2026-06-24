@@ -1,0 +1,37 @@
+{
+  "summary": "Frontend-only review of (1) MCX commodity routing and (2) Toast redesign. Code inspection confirms MCX_COMMODITIES Set + exchangeFor() helper in home.tsx and matching backend MCX_COMMODITIES/MCX_COMMODITY_ITEMS in server.py. Live UI test on viewport 412x915 verified the toast: SUCCESS variant (exit-all on seeded positions) shows '✅ Exited N (100%)' at top=64px, bg=#ECFDF5, border=#10B981; WARNING variant (exit-all on 0 positions) shows '⚠️ No open positions' at top=64px, bg=#FFFBEB, border=#F59E0B — both match TOAST_PALETTE exactly with 4px left border and the position is anchored BELOW the toolbar (NOT bottom). Expiry popover (header-expiry-button → expiry-sheet) opens and dismisses via backdrop click. ACTIONS panel rollback verified: no ScrollView, exitBtn height stays at static 56.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "pointerEvents prop", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Reference: /app/frontend/app/home.tsx:1122 (Animated.View toast has pointerEvents=\"none\" prop)."},
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Occurs in StyleSheet shadowColor/shadowOpacity/shadowRadius/shadowOffset definitions (toast, sheetSurface, expiryPopover, menuPanel, etc.). Not blocking but should migrate to boxShadow for RN web/Reanimated forward-compat. Reference: /app/frontend/app/home.tsx:1307-1311, 1467-1470, 1402-1404, 1520-1524."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: replace `pointerEvents=\"none\"` prop on Animated.View toast with `style={{ pointerEvents: 'none' }}` to silence the deprecation warning (home.tsx line ~1122).",
+    "Optional follow-up: migrate shadow* style props to boxShadow as RN web aligns with the new spec; non-blocking."
+  ],
+  "critical_code_review_comments": [
+    "Code inspection PASSED — MCX_COMMODITIES Set in home.tsx (lines 76-83) includes GOLD, SILVER, CRUDEOIL, NATURALGAS, COPPER, ZINC (+ GOLDM, GOLDGUINEA, SILVERM, CRUDEOILM, NATGASMINI, LEAD, NICKEL, ALUMINIUM, COTTON, MENTHAOIL, CARDAMOM).",
+    "exchangeFor(u) helper (lines 85-89) correctly returns 'BSE' for SENSEX/BANKEX, 'MCX' for MCX set members, 'NSE' otherwise.",
+    "All 4 call sites use exchangeFor(): loadExpiries (line 195), dry-run preview interval (line 402), onPresetPress dry-run (line 429), placePreset live order (line 460). No hard-coded NSE/BSE ternary remains.",
+    "TOAST_PALETTE (lines 93-98) has all 4 entries success/error/info/warning with bg+border+text+emoji fields — verified live: success rgb(236,253,245)/rgb(16,185,129) and warning rgb(255,251,235)/rgb(245,158,11) match #ECFDF5/#10B981 and #FFFBEB/#F59E0B respectively.",
+    "showToast auto-detect (lines 326-337) keyword regex: 'fail|error|denied|invalid' → error; startsWith 'pick ' or includes 'no open'/'missing' → warning; 'order sent|exited N|saved|connected|done|success' → success; default info. Verified live: 'No open positions' → warning (⚠️), 'Exited 1 (100%)' → success (✅).",
+    "Toast position styles (lines 1508-1528): position:absolute, top:64, left:12, right:12, borderLeftWidth:4, zIndex:1000 — anchored below header toolbar as intended.",
+    "Backend MCX_COMMODITIES list (server.py lines 960-977) includes 16 commodities with type='COMMODITY'; MCX_COMMODITY_ITEMS (line 978) attaches exchange='MCX' to each.",
+    "/api/instruments/underlyings appends MCX_COMMODITY_ITEMS in BOTH demo branch (line 991: results = INDEX + FNO_STOCK_ITEMS + MCX_COMMODITY_ITEMS) and live branch (lines 1020-1025: always appends after master-CSV merge).",
+    "ACTIONS panel rollback confirmed (home.tsx lines 794-861): no ScrollView, no viewport-math, exitBtn uses static styles.exitBtn { height: 56 } (line 1389).",
+    "Note for next testing agent: live remote backend at https://quick-trade-73.preview.emergentagent.com still serves the demo-mode underlyings call which DOES include MCX commodities (since server.py is deployed). Confirmed by demo-mode response shape via UI works."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "seed_data_creation": "None — used built-in demo/demo credentials.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Two minor non-blocking RN-web deprecation warnings in console (pointerEvents prop + shadow* style props). Functionality is unaffected. Toast verification covered SUCCESS and WARNING palettes live; error/info palettes verified by code inspection only. Demo login = demo/demo; demo state has 3 seed positions on first load — exit-all closes them, second exit-all triggers the 'No open positions' warning toast.",
+  "rca_of_issue": "N/A — no bugs found. All 5 review request items pass: (1) Toast at top with correct palette/emoji [live verified]; (2) TOAST_PALETTE 4 entries + showToast severity auto-detect [code+live verified]; (3) MCX_COMMODITIES Set + exchangeFor() routes 4 call sites correctly [code verified]; (4) Backend MCX_COMMODITIES/MCX_COMMODITY_ITEMS appended to /api/instruments/underlyings demo+live branches [code verified]; (5) Expiry popover opens/dismisses; ACTIONS panel rollback unchanged [live verified]."
+}

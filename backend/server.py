@@ -953,14 +953,42 @@ FNO_STOCKS = [
     "TRENT", "TVSMOTOR", "UBL", "ULTRACEMCO", "UNITDSPR", "UPL", "VEDL",
     "VOLTAS", "WIPRO", "ZEEL", "ZYDUSLIFE",
 ]
-FNO_STOCK_ITEMS = [{"symbol": s, "name": s, "type": "STOCK"} for s in FNO_STOCKS]
+FNO_STOCK_ITEMS = [{"symbol": s, "name": s, "type": "STOCK", "exchange": "NSE"} for s in FNO_STOCKS]
+
+# MCX commodities universe — used for commodity option trading (Indian
+# Multi Commodity Exchange). Curated from the actively-traded list (Jun 2026).
+MCX_COMMODITIES = [
+    {"symbol": "GOLD", "name": "GOLD", "type": "COMMODITY"},
+    {"symbol": "GOLDM", "name": "GOLD MINI", "type": "COMMODITY"},
+    {"symbol": "SILVER", "name": "SILVER", "type": "COMMODITY"},
+    {"symbol": "SILVERM", "name": "SILVER MINI", "type": "COMMODITY"},
+    {"symbol": "CRUDEOIL", "name": "CRUDE OIL", "type": "COMMODITY"},
+    {"symbol": "CRUDEOILM", "name": "CRUDE OIL MINI", "type": "COMMODITY"},
+    {"symbol": "NATURALGAS", "name": "NATURAL GAS", "type": "COMMODITY"},
+    {"symbol": "NATGASMINI", "name": "NATURAL GAS MINI", "type": "COMMODITY"},
+    {"symbol": "COPPER", "name": "COPPER", "type": "COMMODITY"},
+    {"symbol": "ZINC", "name": "ZINC", "type": "COMMODITY"},
+    {"symbol": "LEAD", "name": "LEAD", "type": "COMMODITY"},
+    {"symbol": "NICKEL", "name": "NICKEL", "type": "COMMODITY"},
+    {"symbol": "ALUMINIUM", "name": "ALUMINIUM", "type": "COMMODITY"},
+    {"symbol": "COTTON", "name": "COTTON", "type": "COMMODITY"},
+    {"symbol": "MENTHAOIL", "name": "MENTHA OIL", "type": "COMMODITY"},
+    {"symbol": "CARDAMOM", "name": "CARDAMOM", "type": "COMMODITY"},
+]
+MCX_COMMODITY_ITEMS = [{**c, "exchange": "MCX"} for c in MCX_COMMODITIES]
+
+# Decorate index list with exchange (BSE for SENSEX/BANKEX, else NSE).
+INDEX_UNDERLYINGS = [
+    {**i, "exchange": "BSE" if i["symbol"] in ("SENSEX", "BANKEX") else "NSE"}
+    for i in INDEX_UNDERLYINGS
+]
 
 
 @api.get("/instruments/underlyings")
 async def underlyings(q: str = "", token: str = Depends(require_token)):
-    """Searchable list of F&O underlyings (indices + stocks)."""
+    """Searchable list of F&O underlyings (indices + stocks + MCX commodities)."""
     if _is_demo(token):
-        results = list(INDEX_UNDERLYINGS) + list(FNO_STOCK_ITEMS)
+        results = list(INDEX_UNDERLYINGS) + list(FNO_STOCK_ITEMS) + list(MCX_COMMODITY_ITEMS)
         if q:
             qu = q.upper()
             results = [r for r in results if qu in r["symbol"].upper() or qu in r["name"].upper()]
@@ -979,7 +1007,7 @@ async def underlyings(q: str = "", token: str = Depends(require_token)):
             existing = {u["symbol"] for u in results}
             for sym in unique:
                 if sym and sym not in existing:
-                    results.append({"symbol": sym, "name": sym, "type": "STOCK"})
+                    results.append({"symbol": sym, "name": sym, "type": "STOCK", "exchange": "NSE"})
         except Exception as exc:  # noqa: BLE001
             logger.warning("Underlying search fallback: %s", exc)
     # Fallback: if the instrument-master couldn't be loaded, append the curated list.
@@ -988,6 +1016,13 @@ async def underlyings(q: str = "", token: str = Depends(require_token)):
         for item in FNO_STOCK_ITEMS:
             if item["symbol"] not in existing:
                 results.append(item)
+
+    # Always append MCX commodities — they are a separate exchange the
+    # instrument-master usually doesn't surface in the F&O segment.
+    existing = {u["symbol"] for u in results}
+    for item in MCX_COMMODITY_ITEMS:
+        if item["symbol"] not in existing:
+            results.append(item)
 
     if q:
         qu = q.upper()

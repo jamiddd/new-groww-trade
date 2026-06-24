@@ -16,6 +16,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import Animated, {
+  FadeInDown,
+  FadeOutUp,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -68,6 +70,33 @@ const formatINR = (n: number) =>
 const formatUSD = (n: number, rate: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n * rate);
 
+// MCX commodities (Indian Multi Commodity Exchange). When the user picks
+// one of these as the underlying, orders + expiry calls must go to the
+// "MCX" exchange instead of NSE/BSE.
+const MCX_COMMODITIES = new Set([
+  "GOLD", "GOLDM", "GOLDGUINEA", "GOLDPETAL",
+  "SILVER", "SILVERM", "SILVERMIC",
+  "CRUDEOIL", "CRUDEOILM",
+  "NATURALGAS", "NATGASMINI",
+  "COPPER", "ZINC", "LEAD", "NICKEL", "ALUMINIUM",
+  "COTTON", "MENTHAOIL", "CARDAMOM",
+]);
+
+const exchangeFor = (u: string): string => {
+  if (u === "SENSEX" || u === "BANKEX") return "BSE";
+  if (MCX_COMMODITIES.has(u)) return "MCX";
+  return "NSE";
+};
+
+// Toast palette — modern, web-like, color-coded by severity.
+type ToastType = "success" | "error" | "info" | "warning";
+const TOAST_PALETTE: Record<ToastType, { bg: string; border: string; text: string; emoji: string }> = {
+  success: { bg: "#ECFDF5", border: "#10B981", text: "#065F46", emoji: "✅" },
+  error:   { bg: "#FEF2F2", border: "#EF4444", text: "#991B1B", emoji: "❌" },
+  info:    { bg: "#EFF6FF", border: "#3B82F6", text: "#1E3A8A", emoji: "ℹ️" },
+  warning: { bg: "#FFFBEB", border: "#F59E0B", text: "#92400E", emoji: "⚠️" },
+};
+
 export default function Home() {
   const router = useRouter();
 
@@ -117,7 +146,7 @@ export default function Home() {
   const [singlePos, setSinglePos] = useState<Position | null>(null);
   const [posMenuVisible, setPosMenuVisible] = useState(false);
   const [placing, setPlacing] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: ToastType } | null>(null);
 
   // Bootstrap settings + last underlying
   useEffect(() => {
@@ -163,11 +192,7 @@ export default function Home() {
 
   const loadExpiries = useCallback(async (u: string) => {
     try {
-      const exch = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"].includes(u)
-        ? "NSE"
-        : u === "SENSEX" || u === "BANKEX"
-        ? "BSE"
-        : "NSE";
+      const exch = exchangeFor(u);
       const res = await api.expiries(u, exch);
       const raw: string[] = res?.expiries || res?.data || res?.items || [];
       const todayIso = new Date().toISOString().slice(0, 10);
@@ -298,9 +323,17 @@ export default function Home() {
     [positions],
   );
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+  const showToast = (msg: string, type?: ToastType) => {
+    // Auto-detect severity from message if not explicitly provided.
+    let t: ToastType = type ?? "info";
+    if (!type) {
+      const low = msg.toLowerCase();
+      if (/(\bfail|error|denied|invalid)/.test(low)) t = "error";
+      else if (low.startsWith("pick ") || low.includes("no open") || low.includes("missing")) t = "warning";
+      else if (/(order sent|exited \d|saved|connected|done|success)/.test(low)) t = "success";
+    }
+    setToast({ msg, type: t });
+    setTimeout(() => setToast(null), 2800);
   };
 
   // Pixel-perfect height animation for the actions panel body. We render
@@ -366,7 +399,7 @@ export default function Home() {
           expiry,
           option_type: optionType,
           capital,
-          exchange: ["SENSEX", "BANKEX"].includes(underlying) ? "BSE" : "NSE",
+          exchange: exchangeFor(underlying),
           dry_run: true,
         })
         .then((res) => setPreview(res as OrderPreview))
@@ -393,7 +426,7 @@ export default function Home() {
           expiry,
           option_type: optionType,
           capital,
-          exchange: ["SENSEX", "BANKEX"].includes(underlying) ? "BSE" : "NSE",
+          exchange: exchangeFor(underlying),
           dry_run: true,
         })
         .then((res) => setPreview(res as OrderPreview))
@@ -424,7 +457,7 @@ export default function Home() {
         expiry: expiry!,
         option_type: optionType,
         capital,
-        exchange: ["SENSEX", "BANKEX"].includes(underlying) ? "BSE" : "NSE",
+        exchange: exchangeFor(underlying),
         limit_price_override: stickyLimitPrice,
       });
       const sym = res?.selected?.trading_symbol ?? "order";
@@ -1076,9 +1109,24 @@ export default function Home() {
       </BottomSheet>
 
       {toast ? (
-        <View style={styles.toast} testID="home-toast">
-          <Text style={styles.toastText}>{toast}</Text>
-        </View>
+        <Animated.View
+          entering={FadeInDown.duration(220)}
+          exiting={FadeOutUp.duration(180)}
+          style={[
+            styles.toast,
+            {
+              backgroundColor: TOAST_PALETTE[toast.type].bg,
+              borderLeftColor: TOAST_PALETTE[toast.type].border,
+            },
+          ]}
+          pointerEvents="none"
+          testID="home-toast"
+        >
+          <Text style={styles.toastEmoji}>{TOAST_PALETTE[toast.type].emoji}</Text>
+          <Text style={[styles.toastText, { color: TOAST_PALETTE[toast.type].text }]} numberOfLines={2}>
+            {toast.msg}
+          </Text>
+        </Animated.View>
       ) : null}
     </SafeAreaView>
   );
@@ -1459,13 +1507,25 @@ const styles = StyleSheet.create({
 
   toast: {
     position: "absolute",
-    bottom: 380,
-    left: 16,
-    right: 16,
-    backgroundColor: "#0F1F4D",
-    padding: 12,
-    borderRadius: 8,
+    top: 64,
+    left: 12,
+    right: 12,
+    flexDirection: "row",
     alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    // iOS shadow
+    shadowColor: "#000",
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    // Android elevation
+    elevation: 6,
+    zIndex: 1000,
   },
-  toastText: { fontFamily: FONT, color: "#FFF", fontSize: 13, fontWeight: "bold" },
+  toastEmoji: { fontSize: 18, lineHeight: 22 },
+  toastText: { fontFamily: FONT, fontSize: 13, fontWeight: "600", flex: 1, lineHeight: 18 },
 });
