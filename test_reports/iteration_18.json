@@ -1,0 +1,44 @@
+{
+  "summary": "Iter_18 backend-only verification of the _fetch_option_ltp segment fix in /app/backend/server.py. Static check PASSED: function at line 1412 now computes `segment = _segment_for(exchange)` (line 1416) and threads that variable into both api_.get_ltp (line 1418) and api_.get_quote (line 1430). No hardcoded \"FNO\" remains in the function body (the only 'FNO' occurrence in the function is inside a comment explaining the fix). Added /app/backend/tests/test_iter18_segment_for_ltp.py with 4 AST-level static checks covering: (a) presence of `segment = _segment_for(exchange)`, (b) absence of hardcoded 'FNO' literal in executable code, (c) `segment` variable threaded into both get_ltp + get_quote, (d) _segment_for unit logic — MCX→SEGMENT_COMMODITY, NSE/BSE/NFO→SEGMENT_FNO. Regression: ran combined test_mcx_commodity_fix.py + test_iter17_mcx_exit_fix.py 8 consecutive times → 24/24 passing every run (20 existing + 4 new). NIFTY breakout_call_mkt dry_run regression (test_nifty_breakout_call_mkt_dry_run in iter17 file) passed in every run, returning lots>=1, quantity==lots*lot_size, no fallback_reason on the happy path. KNOWN PRE-EXISTING FLAKE (unrelated to iter18 fix): three NIFTY demo tests rely on random.uniform(80,200) for the synth LTP — when the random LTP lands above ~₹166.67, 50k capital × 25% sizing / 75-lot rounds lots to 0 and the assertion fails. Observed once in the first batch of runs but did not repeat across the subsequent 8 runs. This is in the random-demo path only; the iter18 change exclusively touches the LIVE MCX LTP fetch path.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/orders/place-preset (demo dry_run)",
+        "issue": "Demo synth-LTP path uses random.uniform(80, 200) for option LTP. For NIFTY (lot=75) with capital=50k and sizing=25% (₹12,500 risk capital), break-even LTP is ₹166.67, so ~17% of runs produce lots=0 and fail `lots>=1` assertions. Recommend either (a) pinning random.seed per-request in demo mode for deterministic tests, (b) capping random.uniform upper bound to ~150 so NIFTY 50k always covers 1 lot, or (c) raising the test capital to 100k. Pre-existing — NOT caused by the iter18 _fetch_option_ltp change."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter18_segment_for_ltp.py",
+    "/app/backend/tests/test_mcx_commodity_fix.py",
+    "/app/backend/tests/test_iter17_mcx_exit_fix.py",
+    "/app/test_reports/pytest/iter18_results.xml"
+  ],
+  "action_items": [
+    "(Optional, low priority) Stabilise the demo synth-LTP NIFTY tests — either pin random.seed, cap the random upper bound to ~150, or raise test capital to 100k. Pre-existing flake; ~17% failure rate on three demo tests when random LTP > ₹166.67. Not blocking the iter18 fix.",
+    "User still needs to redeploy the droplet to consume the iter_16+17+18 fixes against a live Groww MCX token (cannot be exercised in this environment without real credentials)."
+  ],
+  "critical_code_review_comments": [
+    "_fetch_option_ltp now correctly delegates segment selection to _segment_for(exchange); same helper is consistently used elsewhere (lines 1480, 1629, 2240, 2479) — good consistency.",
+    "server.py is 2624 lines — flagged in earlier iterations; still worth splitting into modules (presets, orders, market_data, instruments) but out of scope for this iter18 bug fix."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter18_segment_for_ltp.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 across 8 consecutive runs after the new static checks were added; 19/20 on one earlier run due to pre-existing demo-random flake unrelated to iter18)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter18 fix is a one-line change in _fetch_option_ltp swapping the hardcoded 'FNO' literal for segment=_segment_for(exchange). Verified via AST static checks + 24/24 regression. Live MCX LTP behavior cannot be exercised here (no Groww token); droplet redeploy is required to validate end-to-end. If a NIFTY demo dry_run test fails intermittently with `lots=0`, it's the pre-existing random-LTP flake — not a regression — see backend_issues.minor for the recommended fix.",
+  "rca_of_issue": "Root cause (already fixed by main agent): _fetch_option_ltp passed the literal string 'FNO' as the segment argument to api_.get_ltp / api_.get_quote, so live MCX commodity option LTP requests were routed under SEGMENT_FNO and returned 0. The fix computes segment via _segment_for(exchange) (which returns SEGMENT_COMMODITY for MCX, SEGMENT_FNO otherwise) and threads that into both calls, allowing the master-scan fallback to obtain a real LTP for the picked MCX strike, which in turn unlocks correct lot sizing and LIMIT pricing downstream in _dry_preview / place_order. Verified via AST static checks at /app/backend/tests/test_iter18_segment_for_ltp.py."
+}

@@ -1411,20 +1411,23 @@ async def _fetch_spot_ltp(api_: GrowwAPI, underlying: str, exchange: str) -> flo
 
 async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) -> float:
     sym = f"{exchange}_{trading_symbol}"
+    # MCX commodity options route through SEGMENT_COMMODITY in the live-data
+    # endpoints. Hardcoding "FNO" caused every commodity LTP fetch to 404.
+    segment = _segment_for(exchange)
     try:
-        data = await _call_blocking(api_.get_ltp, (sym,), "FNO")
+        data = await _call_blocking(api_.get_ltp, (sym,), segment)
         ltp = (
             _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"])
             or _first_positive_numeric(data)
         )
         if ltp and ltp > 0:
-            logger.info("option ltp %s = %s", trading_symbol, ltp)
+            logger.info("option ltp %s = %s (segment=%s)", trading_symbol, ltp, segment)
             return float(ltp)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("option ltp %s failed: %s", trading_symbol, exc)
+        logger.debug("option ltp %s failed (segment=%s): %s", trading_symbol, segment, exc)
     # Fallback: get_quote
     try:
-        data = await _call_blocking(api_.get_quote, trading_symbol, exchange, "FNO")
+        data = await _call_blocking(api_.get_quote, trading_symbol, exchange, segment)
         ltp = (
             _find_numeric_by_keys(data, ["last_price", "ltp", "last_traded_price"])
             or _first_positive_numeric(data)
@@ -1432,7 +1435,7 @@ async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) 
         if ltp and ltp > 0:
             return float(ltp)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("option quote %s failed: %s", trading_symbol, exc)
+        logger.debug("option quote %s failed (segment=%s): %s", trading_symbol, segment, exc)
     return 0.0
 
 
