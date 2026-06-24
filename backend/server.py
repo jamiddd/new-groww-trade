@@ -151,6 +151,13 @@ class PlacePresetOrderRequest(BaseModel):
     exchange: str = "NSE"
     capital: float  # used for position sizing
     dry_run: bool = False
+    # Sticky-price hook: when the confirmation dialog is up the frontend
+    # polls the dry-run preview every few seconds and the user sees a
+    # specific LIMIT price. To guarantee the order is placed at THAT exact
+    # price (not whatever LTP × offset evaluates to milliseconds later on
+    # the server), the frontend echoes the displayed price back on the
+    # final confirm. Only honored for LIMIT orders.
+    limit_price_override: Optional[float] = None
 
 
 class ExitRequest(BaseModel):
@@ -1630,7 +1637,11 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             )
 
         if payload.dry_run:
-            entry_demo = ltp if order_type_str == "MARKET" else round(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100), 1)
+            entry_demo = (
+                ltp
+                if order_type_str == "MARKET"
+                else _round_tick(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100))
+            )
             demo_levels = _compute_sl_tp(
                 entry_demo,
                 float(preset_doc.get("stop_loss_pct") or 0),
@@ -1649,7 +1660,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                     "trading_symbol": fake_symbol,
                     "transaction_type": "BUY",
                     "order_type": order_type_str,
-                    "price": 0 if order_type_str == "MARKET" else round(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100), 1),
+                    "price": 0 if order_type_str == "MARKET" else entry_demo,
                 },
                 "protective_preview": {
                     "entry_price": entry_demo,
@@ -1736,6 +1747,15 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
                 "sl_pct": demo_protective.get("sl_pct"),
             })
             await _save_demo_state(token, doc)
+        # Compute the LIMIT price the same way as for live orders so the
+        # demo response shape matches and the confirmation dialog can
+        # honor sticky-pricing.
+        if payload.limit_price_override and payload.limit_price_override > 0 and order_type_str == "LIMIT":
+            demo_price = _round_tick(float(payload.limit_price_override))
+        elif order_type_str == "LIMIT":
+            demo_price = _round_tick(ltp * (1 + float(preset_doc.get("limit_offset_pct") or 0) / 100))
+        else:
+            demo_price = 0.0
         return {
             "preset": preset_doc,
             "selected": {"trading_symbol": unique_symbol, "strike": strike, "ltp": ltp},
@@ -1743,7 +1763,12 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
             "lots": lots,
             "lot_size": lot,
             "estimated_cost": round(qty * ltp, 2),
-            "order": {"trading_symbol": unique_symbol, "transaction_type": "BUY", "order_type": order_type_str},
+            "order": {
+                "trading_symbol": unique_symbol,
+                "transaction_type": "BUY",
+                "order_type": order_type_str,
+                "price": demo_price,
+            },
             "response": {"order_id": order_id, "status": "EXECUTED"},
             "protective_order": demo_protective,
             "demo": True,
@@ -1885,8 +1910,18 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     order_type = preset_doc["order_type"]
     price = 0.0
     if order_type == "LIMIT":
-        offset = float(preset_doc.get("limit_offset_pct", 0.5)) / 100.0
-        price = round(pick["ltp"] * (1 + offset), 1)
+        # Sticky-price: when the frontend confirms the user pressed BUY on
+        # a specific displayed price, honor that exact value so the order
+        # executes at what the user actually saw (and not whatever LTP ×
+        # offset evaluates to seconds later on the server side).
+        if payload.limit_price_override and payload.limit_price_override > 0:
+            price = _round_tick(payload.limit_price_override)
+        else:
+            offset = float(preset_doc.get("limit_offset_pct", 0.5)) / 100.0
+            # Round to the 0.05 option tick so the price exactly reflects
+            # the configured offset percentage (and Groww doesn't reject
+            # for invalid tick increments).
+            price = _round_tick(pick["ltp"] * (1 + offset))
 
     order_payload = {
         "validity": GrowwAPI.VALIDITY_DAY,

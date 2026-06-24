@@ -144,7 +144,20 @@ export const api = {
     req<any>(`/instruments/expiries?underlying=${encodeURIComponent(underlying)}&exchange=${exchange}`),
   optionChain: (underlying: string, expiry: string, option_type: "CE" | "PE", exchange: string = "NSE") =>
     req<any>(`/instruments/option-chain?underlying=${encodeURIComponent(underlying)}&expiry=${expiry}&option_type=${option_type}&exchange=${exchange}`),
-  placePreset: (payload: { preset_key: string; underlying: string; expiry: string; option_type: "CE" | "PE"; capital: number; exchange?: string; dry_run?: boolean }) =>
+  placePreset: (payload: {
+    preset_key: string;
+    underlying: string;
+    expiry: string;
+    option_type: "CE" | "PE";
+    capital: number;
+    exchange?: string;
+    dry_run?: boolean;
+    /** Sticky price for LIMIT orders — when set on the final BUY, the
+     * server places the order at exactly this price instead of re-computing
+     * from a (potentially newer) LTP. Set this to whatever was displayed
+     * to the user in the confirmation dialog. */
+    limit_price_override?: number;
+  }) =>
     req<any>("/orders/place-preset", { method: "POST", body: JSON.stringify({ exchange: "NSE", ...payload }) }),
   exit: (body: { percent?: 25 | 50 | 100; trading_symbol?: string; pnl_filter?: "positive" | "negative" }) =>
     req<any>("/orders/exit", { method: "POST", body: JSON.stringify({ percent: 100, ...body }) }),

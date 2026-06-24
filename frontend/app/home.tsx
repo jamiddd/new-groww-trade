@@ -276,6 +276,34 @@ export default function Home() {
     setTimeout(() => setToast(null), 2500);
   };
 
+  // Live LTP refresh inside the open confirmation dialog: every 3 s, while
+  // a preset is queued for confirmation and we're not actively placing the
+  // order, re-run the dry-run so the displayed LTP / LIMIT-price / SL / TP
+  // levels stay current. Otherwise the user would be looking at a frozen
+  // snapshot from when they tapped the button.
+  useEffect(() => {
+    if (!confirmPreset) return;
+    if (!expiry) return;
+    const id = setInterval(() => {
+      if (placing) return;
+      api
+        .placePreset({
+          preset_key: confirmPreset.key,
+          underlying,
+          expiry,
+          option_type: optionType,
+          capital,
+          exchange: ["SENSEX", "BANKEX"].includes(underlying) ? "BSE" : "NSE",
+          dry_run: true,
+        })
+        .then((res) => setPreview(res as OrderPreview))
+        .catch(() => {
+          /* leave the previous preview on screen, don't toast every 3s */
+        });
+    }, 3000);
+    return () => clearInterval(id);
+  }, [confirmPreset, expiry, underlying, optionType, capital, placing]);
+
   const onPresetPress = (preset: PresetSummary) => {
     if (!expiry) {
       showToast("Pick an expiry first");
@@ -304,6 +332,15 @@ export default function Home() {
   };
 
   const placePreset = async (preset: PresetSummary) => {
+    // Capture the LIMIT price the user actually saw on the confirmation
+    // dialog BEFORE we tear down the preview state — otherwise the order
+    // would be placed at whatever LTP × offset evaluates to on the server
+    // at that exact millisecond (which could differ from the displayed
+    // price by a few ticks during fast moves).
+    const stickyLimitPrice =
+      preview?.order?.order_type === "LIMIT" && preview?.order?.price
+        ? Number(preview.order.price)
+        : undefined;
     setPlacing(true);
     setConfirmPreset(null);
     setPreview(null);
@@ -315,6 +352,7 @@ export default function Home() {
         option_type: optionType,
         capital,
         exchange: ["SENSEX", "BANKEX"].includes(underlying) ? "BSE" : "NSE",
+        limit_price_override: stickyLimitPrice,
       });
       const sym = res?.selected?.trading_symbol ?? "order";
       showToast(`Order sent: ${sym} × ${res?.quantity ?? "?"}`);
