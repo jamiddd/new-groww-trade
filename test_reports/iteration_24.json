@@ -1,0 +1,36 @@
+{
+  "summary": "Iter24 backend retest PASSED. 26/26 pytest tests pass (15 new in test_iter24_response_cache.py + 11 iter23 regression). Validated: (1) 8-way concurrent burst on /api/account/margin all return 200 in <5s wall-clock with consistent opening_capital_today across the burst — even though demo bypasses the cache, the endpoint stays stable under burst. (2) Direct unit coverage of _cached_response confirms single-flight semantics: 5 concurrent callers fire the producer ONCE (call_count==1) and all receive the identical cached payload — this validates the live-mode coalescing path that can't be exercised end-to-end from this pod. (3) TTL expiry correctly forces a new producer call after the cache window. (4) _invalidate_response_cache drops only matching (kind, token) entries, leaves other-token entries intact, and is a no-op when the key is absent. (5) POST /api/account/refresh-capital demo returns ok:true,demo:true. (6) Endpoint smoke: /account/margin, /account/positions, /orders/smart-orders, /account/orders, /instruments/option-chain, /instruments/expiries, /instruments/underlyings, /orders/place-preset(dry_run) all 200. Code review: _cached_response (server.py:168-187) and _invalidate_response_cache (server.py:190-195) are tight, correct, and minimal; double-checked-lock pattern around _response_lock is sound; LRU-ish eviction at 256 entries (drop 64 oldest) prevents unbounded growth. _groww_client (server.py:207-) per-token cache + asyncio.Lock looks correct.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_response_cache.py",
+    "/app/backend/tests/test_iter23_option_chain_demo.py",
+    "/app/test_reports/pytest/iter24_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:168-187 _cached_response uses canonical double-checked-locking + asyncio.Lock for single-flight coalescing. Verified empirically (5 concurrent callers → 1 producer invocation). Memory cap at 256 with 64-eviction batch is reasonable.",
+    "server.py:190-195 _invalidate_response_cache is a tight per-token, per-kind pop loop — correctly leaves OTHER_TOKEN entries untouched. Confirmed via unit test.",
+    "server.py:207-242 _groww_client per-token cache with _GROWW_CLIENT_LOCK eliminates the 'Ready to Groww!' per-request churn cited in the user repro. Bounded growth guard is in place.",
+    "server.py:1011, 1131, 2899 — margin/positions/smart_orders all wrap their _produce() in _cached_response with the same 1.5 s TTL. Invalidation hooks fire at server.py:1025 (refresh-capital), 2707 (place-preset), 2861 (exit), so cache freshness is correctly maintained around state mutations.",
+    "server.py now 3009 lines (was 2860 at iter23) — guideline says >700 lines warrants a split. Suggest extracting demo helpers, response cache + groww client cache, and instrument-master loaders into separate modules in a follow-up.",
+    "Minor: server.py still uses @app.on_event('startup'/'shutdown') (lines 2987, 3007) — deprecated in FastAPI; migrate to lifespan handlers when convenient."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter24_response_cache.py (new — 15 tests covering burst coalescing, _cached_response single-flight, TTL, invalidation, refresh-capital demo, and endpoint smoke)"
+  ],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "N/A — backend-only run"},
+  "seed_data_creation": "None. Demo token DEMO__SCALPX__TOKEN drives all HTTP-layer assertions; direct helper tests insert and clean up their own synthetic _RESPONSE_CACHE entries.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reusable: /app/backend/tests/test_iter24_response_cache.py (cache + burst + smoke) and /app/backend/tests/test_iter23_option_chain_demo.py (chain + iter22 regression). Backend on http://localhost:8001, demo header X-Groww-Token: DEMO__SCALPX__TOKEN. Live Groww mode remains MOCKED — only demo paths exercised over HTTP; live coalescing is validated by direct unit tests against server._cached_response. The unit tests import server via `sys.path.insert(0, '/app/backend'); import server` — note that the in-process _RESPONSE_CACHE accessed by the tests is a DIFFERENT module instance than the running uvicorn process; this is intentional and the helper-level assertions are still authoritative. Iter24 implementation is at server.py:156-195 (caches + helpers), server.py:207-242 (_groww_client per-token cache), and the wrap points at server.py:1011 (margin), 1131 (positions), 2899 (smart_orders), with invalidation at 1025 (refresh-capital), 2707 (place-preset), 2861 (exit).",
+  "rca_of_issue": "Pre-iter24 RCA (user repro): Groww upstream returned 'Rate limit has breached for your request' and the FastAPI layer mapped that to 502 on /account/margin under 5-tab polling because each request: (a) constructed a fresh GrowwAPI client ('Ready to Groww!' per request), (b) fanned out simultaneously to Groww's get_available_margin_details without any coalescing, and (c) tripped Groww's per-IP rate limiter. Iter24 fix is two-pronged: a process-wide per-token GrowwAPI client cache (eliminates session churn) + a per-(kind,token) 1.5 s TTL response cache fronted by an asyncio.Lock (5 concurrent callers in the TTL window collapse to 1 upstream call). State-mutating endpoints invalidate their relevant kinds so the next poll picks up fresh data. Verified empirically — TestCachedResponseHelper::test_single_flight_under_five_concurrent_callers shows call_count==1 after 5 racing callers; TestMarginBurstCoalescing::test_eight_concurrent_margin_requests_all_200 shows no 502/429 under 8-way burst."
+}

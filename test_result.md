@@ -146,7 +146,53 @@ backend:
         agent: "main"
         comment: "When the live instrument-master scan returns no expiries we now hit Groww's historical /get_expiries for (current_year, current_year+1) in parallel via asyncio.gather instead of serially."
 
-  - task: "Short-TTL single-flight cache around get_option_chain"
+  - task: "Per-token response cache for polling endpoints (margin/positions/smart-orders)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added a 1.5s per-token TTL + asyncio.Lock single-flight wrapper (_cached_response) around the three hot polling endpoints. The user's Droplet logs showed 5 concurrent client connections × 3 polling endpoints firing in the same 200ms window, triggering Groww's rate limiter ('Rate limit has breached for your request'). The cache coalesces those bursts into one upstream call per 1.5s window. State-mutating endpoints (place-preset, exit, refresh-capital) explicitly invalidate the relevant cache keys via _invalidate_response_cache(token, ...) so the next poll never serves stale data after a buy/sell."
+
+  - task: "Disk cache persisted to docker volume so it survives `docker compose up --build`"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py, /app/deploy/docker-compose.yml"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Root cause of the 60s WORKER TIMEOUT after redeploy: /tmp/scalpx_instruments.pkl was inside the container and got wiped on `--build`, so the first request triggered a cold 162k-row download which hit gunicorn's 60s --timeout. Added SCALPX_CACHE_DIR env var (defaults to /tmp for dev), pointed it at a docker volume `scalpx_cache` mounted at /var/scalpx-cache, and added the named volume in docker-compose.yml. Now the pickle survives rebuilds."
+
+  - task: "Per-token GrowwAPI client cache"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "_groww_client(token) was instantiating a fresh GrowwAPI per request (every 'Ready to Groww!' log line). Now caches per-token behind threading.Lock with FIFO eviction at 32 entries."
+
+  - task: "Hard asyncio.wait_for timeouts on hot Groww endpoints"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Wrapped /account/margin, /account/positions (per segment), /orders/smart-orders, and /account/orders (per segment) with 8s asyncio.wait_for caps. Previously, a hanging Groww call could block a gunicorn worker until the 60s --timeout fired and SIGKILL killed it. Now the request returns 504 / [] gracefully and the worker stays alive."
     implemented: true
     working: true
     file: "/app/backend/server.py"

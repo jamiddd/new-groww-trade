@@ -26,6 +26,13 @@ services:
     environment:
       MONGO_URL: mongodb://mongo:27017
       DB_NAME: ${DB_NAME:-scalpx}
+      # Where to persist the Groww instrument-master CSV across restarts.
+      # The disk pickle lives on a docker volume so a `docker compose up
+      # --build` doesn't trigger a cold 162k-row download (which used to
+      # block the first request long enough to hit gunicorn's 60s timeout).
+      SCALPX_CACHE_DIR: /var/scalpx-cache
+    volumes:
+      - scalpx_cache:/var/scalpx-cache
     expose:
       - "8001"
 
@@ -48,3 +55,4 @@ volumes:
   mongo_data:
   caddy_data:
   caddy_config:
+  scalpx_cache:

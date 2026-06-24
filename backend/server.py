@@ -66,7 +66,14 @@ db = mongo_client[os.environ["DB_NAME"]]
 _INSTRUMENTS_CACHE: Dict[str, Any] = {"loaded_at": 0.0, "df": None}
 _INSTRUMENTS_TTL = 60 * 60  # 1h
 _INSTRUMENTS_DISK_TTL = 6 * 60 * 60  # 6h — disk warm-start is "good enough"
-_INSTRUMENTS_DISK_PATH = Path("/tmp/scalpx_instruments.pkl")
+# In docker, mount a volume at /var/scalpx-cache so the pickle survives
+# `docker compose up --build`. Falls back to /tmp for local dev.
+_SCALPX_CACHE_DIR = Path(os.environ.get("SCALPX_CACHE_DIR", "/tmp"))
+try:
+    _SCALPX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as exc:  # noqa: BLE001
+    logger.warning("Could not create cache dir %s: %s", _SCALPX_CACHE_DIR, exc)
+_INSTRUMENTS_DISK_PATH = _SCALPX_CACHE_DIR / "scalpx_instruments.pkl"
 _INSTRUMENTS_LOCK = threading.Lock()
 
 
@@ -132,6 +139,60 @@ async def _load_instruments_async(token: str):
     if df is not None and (time.time() - _INSTRUMENTS_CACHE["loaded_at"]) < _INSTRUMENTS_TTL:
         return df
     return await asyncio.to_thread(_load_instruments, token)
+
+
+# ---------------------------------------------------------------------------
+# Per-token response cache for hot polling endpoints
+# ---------------------------------------------------------------------------
+# The frontend polls /account/margin, /account/positions and /orders/smart-orders
+# every 5 s — but during navigation / quick re-mounts we routinely see 3-5
+# concurrent connections fire those endpoints in the same 200 ms window.
+# Without a coalescing cache, every burst translates into 9-15 simultaneous
+# Groww calls and trips its server-side rate limiter (the user observed
+# "Rate limit has breached for your request" with cascading 502s).
+#
+# A tiny per-token TTL+single-flight wrapper fixes that with no UX impact
+# (1.5 s of staleness is unnoticeable for margin / positions / smart orders).
+_RESPONSE_CACHE: Dict[tuple, Dict[str, Any]] = {}
+_RESPONSE_LOCKS: Dict[tuple, asyncio.Lock] = {}
+
+
+def _response_lock(key: tuple) -> asyncio.Lock:
+    lock = _RESPONSE_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _RESPONSE_LOCKS[key] = lock
+    return lock
+
+
+async def _cached_response(key: tuple, ttl: float, producer):
+    """Return a cached response if fresh; otherwise call `producer()` once
+    (other concurrent callers wait on the lock) and cache the result."""
+    entry = _RESPONSE_CACHE.get(key)
+    now = time.time()
+    if entry and (now - entry["ts"]) < ttl:
+        return entry["data"]
+    async with _response_lock(key):
+        entry = _RESPONSE_CACHE.get(key)
+        now = time.time()
+        if entry and (now - entry["ts"]) < ttl:
+            return entry["data"]
+        data = await producer()
+        _RESPONSE_CACHE[key] = {"ts": time.time(), "data": data}
+        if len(_RESPONSE_CACHE) > 256:
+            # Drop the 64 oldest entries — cheap insurance against runaway growth.
+            for k, _ in sorted(_RESPONSE_CACHE.items(), key=lambda kv: kv[1]["ts"])[:64]:
+                _RESPONSE_CACHE.pop(k, None)
+                _RESPONSE_LOCKS.pop(k, None)
+        return data
+
+
+def _invalidate_response_cache(token: str, *kinds: str) -> None:
+    """Drop cached entries for this token — called after a state-mutating
+    request (order placement, smart-order cancel, etc.) so the next poll
+    sees fresh data."""
+    for kind in kinds:
+        _RESPONSE_CACHE.pop((kind, token), None)
 
 
 # ---------------------------------------------------------------------------
@@ -898,50 +959,56 @@ async def margin(token: str = Depends(require_token)):
         data["opening_capital_today"] = _demo_margin_base()
         return data
 
-    api_ = _groww_client(token)
-    try:
-        # Hard 8 s cap so a slow/hanging Groww call can never block a gunicorn
-        # worker into the 30 s default kill timeout — that was the root cause
-        # of the periodic SIGKILL "Perhaps out of memory?" lines on the
-        # Droplet under polling load.
-        data = await asyncio.wait_for(
-            _call_blocking(api_.get_available_margin_details),
-            timeout=8.0,
+    async def _produce():
+        api_ = _groww_client(token)
+        try:
+            # Hard 8 s cap so a slow/hanging Groww call can never block a gunicorn
+            # worker into the 30 s default kill timeout — that was the root cause
+            # of the periodic SIGKILL "Perhaps out of memory?" lines on the
+            # Droplet under polling load.
+            data = await asyncio.wait_for(
+                _call_blocking(api_.get_available_margin_details),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Groww margin fetch timed out") from None
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        # Defensive: roll up every cash/used/collateral bucket across every
+        # segment Groww returns. Single-bucket extraction was missing parts of
+        # the user's actual capital, which is what caused the visible mismatch.
+        summary = _compute_total_trading_balance(data)
+        total_now = summary["total"]
+        logger.info(
+            "margin extract: avail=%s used=%s collateral=%s total=%s",
+            summary["available"], summary["used"], summary["collateral"], total_now,
         )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Groww margin fetch timed out") from None
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Defensive: roll up every cash/used/collateral bucket across every
-    # segment Groww returns. Single-bucket extraction was missing parts of
-    # the user's actual capital, which is what caused the visible mismatch.
-    summary = _compute_total_trading_balance(data)
-    total_now = summary["total"]
-    logger.info(
-        "margin extract: avail=%s used=%s collateral=%s total=%s",
-        summary["available"], summary["used"], summary["collateral"], total_now,
-    )
+        today_iso = datetime.now(timezone.utc).date().isoformat()
+        user_key = _user_key(token)
+        snap = await db.opening_capital.find_one({"user": user_key, "date": today_iso}, {"_id": 0})
+        if not snap and total_now > 0:
+            snap = {"user": user_key, "date": today_iso, "capital": total_now}
+            await db.opening_capital.insert_one(snap)
+        opening = float(snap["capital"]) if snap else total_now
 
-    today_iso = datetime.now(timezone.utc).date().isoformat()
-    user_key = _user_key(token)
-    snap = await db.opening_capital.find_one({"user": user_key, "date": today_iso}, {"_id": 0})
-    if not snap and total_now > 0:
-        snap = {"user": user_key, "date": today_iso, "capital": total_now}
-        await db.opening_capital.insert_one(snap)
-    opening = float(snap["capital"]) if snap else total_now
+        if isinstance(data, dict):
+            data["opening_capital_today"] = opening
+            # Canonical fields the frontend reads:
+            # `available_margin` is the LIVE total balance (sum of all buckets);
+            # `used_margin` is what's currently blocked. PnL today = total - opening.
+            data["available_margin"] = total_now
+            data["used_margin"] = summary["used"]
+            data["collateral"] = summary["collateral"]
+            data["available_cash"] = summary["available"]
+            data["total_balance"] = total_now
+        return data
 
-    if isinstance(data, dict):
-        data["opening_capital_today"] = opening
-        # Canonical fields the frontend reads:
-        # `available_margin` is the LIVE total balance (sum of all buckets);
-        # `used_margin` is what's currently blocked. PnL today = total - opening.
-        data["available_margin"] = total_now
-        data["used_margin"] = summary["used"]
-        data["collateral"] = summary["collateral"]
-        data["available_cash"] = summary["available"]
-        data["total_balance"] = total_now
-    return data
+    # 1.5 s response cache — absorbs concurrent polling bursts (5 tabs ×
+    # /account/margin in the same 200 ms window → 1 Groww call instead of 5)
+    # without making the UI feel stale.
+    return await _cached_response(("margin", token), 1.5, _produce)
 
 
 @api.post("/account/refresh-capital")
@@ -954,6 +1021,8 @@ async def refresh_capital(token: str = Depends(require_token)):
         return {"ok": True, "demo": True}
     today_iso = datetime.now(timezone.utc).date().isoformat()
     await db.opening_capital.delete_many({"user": _user_key(token), "date": today_iso})
+    # Drop the cached margin payload so the next poll re-snapshots immediately.
+    _invalidate_response_cache(token, "margin")
     return {"ok": True}
 
 
@@ -1031,31 +1100,35 @@ def _merge_order_lists(*sources: Any) -> Dict[str, Any]:
 async def positions(token: str = Depends(require_token)):
     if _is_demo(token):
         return await _demo_positions(token)
-    api_ = _groww_client(token)
-    # Fetch open positions from every segment so a position the user
-    # opened via the regular Groww app (e.g. an equity buy in CASH segment)
-    # also shows up here. Each call is independent — a 502 from one
-    # shouldn't black-hole the others.
-    async def _safe(segment: str) -> Any:
-        try:
-            return await asyncio.wait_for(
-                _call_blocking(api_.get_positions_for_user, segment),
-                timeout=8.0,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("positions fetch (%s) timed out", segment)
-            return None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("positions fetch (%s) failed: %s", segment, exc)
-            return None
 
-    # Fan out across segments in parallel so the worst-case latency is one
-    # 8 s timeout instead of N×8 s if Groww hangs on a single segment.
-    fno, cash = await asyncio.gather(
-        _safe(GrowwAPI.SEGMENT_FNO),
-        _safe(GrowwAPI.SEGMENT_CASH),
-    )
-    return _merge_position_lists(fno, cash)
+    async def _produce():
+        api_ = _groww_client(token)
+        # Fetch open positions from every segment so a position the user
+        # opened via the regular Groww app (e.g. an equity buy in CASH segment)
+        # also shows up here. Each call is independent — a 502 from one
+        # shouldn't black-hole the others.
+        async def _safe(segment: str) -> Any:
+            try:
+                return await asyncio.wait_for(
+                    _call_blocking(api_.get_positions_for_user, segment),
+                    timeout=8.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("positions fetch (%s) timed out", segment)
+                return None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("positions fetch (%s) failed: %s", segment, exc)
+                return None
+
+        # Fan out across segments in parallel so the worst-case latency is one
+        # 8 s timeout instead of N×8 s if Groww hangs on a single segment.
+        fno, cash = await asyncio.gather(
+            _safe(GrowwAPI.SEGMENT_FNO),
+            _safe(GrowwAPI.SEGMENT_CASH),
+        )
+        return _merge_position_lists(fno, cash)
+
+    return await _cached_response(("positions", token), 1.5, _produce)
 
 
 @api.get("/account/orders")
@@ -2627,6 +2700,12 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
+    # State just changed — invalidate the polling caches so the next
+    # refresh on the home screen shows the new position / smart order
+    # immediately instead of waiting up to 1.5 s for the stale entry to
+    # expire.
+    _invalidate_response_cache(token, "positions", "smart_orders", "margin")
+
     return {
         "selected": pick,
         "quantity": quantity,
@@ -2777,6 +2856,10 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
         except Exception as exc:  # noqa: BLE001
             results.append({"trading_symbol": trading_symbol, "error": str(exc)})
 
+    # Positions / smart orders / margin just changed — drop caches so the
+    # next poll shows the updated state.
+    _invalidate_response_cache(token, "positions", "smart_orders", "margin")
+
     return {
         "closed": results,
         "count": len(results),
@@ -2793,24 +2876,27 @@ async def list_smart_orders(token: str = Depends(require_token)):
         items = [so for so in doc.get("smart_orders", []) if so.get("status") == "ACTIVE"]
         return {"items": items}
 
-    api_ = _groww_client(token)
-    items = await _list_active_smart_orders(api_)
-    # Normalise to a small subset of fields the frontend actually uses, so
-    # downstream rendering doesn't depend on Groww's exact key names.
-    out: List[Dict[str, Any]] = []
-    for so in items:
-        out.append({
-            "smart_order_id": so.get("smart_order_id") or so.get("id"),
-            "trading_symbol": so.get("trading_symbol") or so.get("symbol"),
-            "smart_order_type": so.get("smart_order_type") or so.get("type"),
-            "status": so.get("status") or "ACTIVE",
-            "tp_price": so.get("target", {}).get("trigger_price") if isinstance(so.get("target"), dict) else so.get("tp_price"),
-            "sl_price": so.get("stop_loss", {}).get("trigger_price") if isinstance(so.get("stop_loss"), dict) else so.get("sl_price"),
-            "trigger_price": so.get("trigger_price"),
-            "trigger_direction": so.get("trigger_direction"),
-            "quantity": so.get("quantity"),
-        })
-    return {"items": out}
+    async def _produce():
+        api_ = _groww_client(token)
+        items = await _list_active_smart_orders(api_)
+        # Normalise to a small subset of fields the frontend actually uses, so
+        # downstream rendering doesn't depend on Groww's exact key names.
+        out: List[Dict[str, Any]] = []
+        for so in items:
+            out.append({
+                "smart_order_id": so.get("smart_order_id") or so.get("id"),
+                "trading_symbol": so.get("trading_symbol") or so.get("symbol"),
+                "smart_order_type": so.get("smart_order_type") or so.get("type"),
+                "status": so.get("status") or "ACTIVE",
+                "tp_price": so.get("target", {}).get("trigger_price") if isinstance(so.get("target"), dict) else so.get("tp_price"),
+                "sl_price": so.get("stop_loss", {}).get("trigger_price") if isinstance(so.get("stop_loss"), dict) else so.get("sl_price"),
+                "trigger_price": so.get("trigger_price"),
+                "trigger_direction": so.get("trigger_direction"),
+                "quantity": so.get("quantity"),
+            })
+        return {"items": out}
+
+    return await _cached_response(("smart_orders", token), 1.5, _produce)
 
 
 # ---------------------------------------------------------------------------
