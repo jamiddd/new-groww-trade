@@ -263,8 +263,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   heroPriceBlock: {
-    backgroundColor: Colors.primary,
+    backgroundColor: "#EAF1FF",
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#C6D6F5",
     padding: 16,
     marginTop: 14,
     alignItems: "center",
@@ -272,7 +274,7 @@ const styles = StyleSheet.create({
   heroPriceLabel: {
     fontFamily: FONT,
     fontSize: 10,
-    color: "rgba(255,255,255,0.85)",
+    color: Colors.textSecondary,
     fontWeight: "bold",
     letterSpacing: 1.4,
     marginBottom: 4,
@@ -280,14 +282,14 @@ const styles = StyleSheet.create({
   heroPriceValue: {
     fontFamily: FONT,
     fontSize: 28,
-    color: "#FFFFFF",
+    color: Colors.primary,
     fontWeight: "900",
     letterSpacing: 0.4,
   },
   heroPriceSub: {
     fontFamily: FONT,
     fontSize: 11,
-    color: "rgba(255,255,255,0.85)",
+    color: Colors.textSecondary,
     marginTop: 6,
   },
   cardLabel: {
