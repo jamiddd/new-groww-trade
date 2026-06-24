@@ -656,30 +656,30 @@ export default function Home() {
         )}
       </ScrollView>
 
-      {/* Sticky footer with controls */}
-      <SafeAreaView edges={["bottom"]} style={styles.footerWrap}>
-        <View style={styles.footer}>
+      {/* Persistent bottom sheet — always docked at the bottom, looks
+          and feels like @gorhom/bottom-sheet with a grab handle, rounded
+          top corners, and an upward elevation shadow. Stays in layout
+          so the ScrollView above naturally insets around it. */}
+      <SafeAreaView edges={["bottom"]} style={styles.sheetSafeBg}>
+        <View style={styles.sheetSurface}>
           <GestureDetector gesture={actionsPanGesture}>
             <View>
               <TouchableOpacity
-                style={styles.actionsHeader}
+                style={styles.sheetHeader}
                 onPress={() => setActionsCollapsedPersistent(!actionsCollapsed)}
                 testID="actions-toggle"
-                activeOpacity={0.7}
+                activeOpacity={0.9}
               >
-                <Text style={styles.actionsHeaderLabel}>ACTIONS</Text>
-            {settings?.practice_mode ? (
-              <View style={styles.practiceBadge} testID="practice-mode-badge">
-                <Feather name="shield" size={9} color="#FFFFFF" />
-                <Text style={styles.practiceBadgeText}>PRACTICE · 1 LOT</Text>
-              </View>
-            ) : null}
-            <View style={{ flex: 1 }} />
-            <Feather
-              name={actionsCollapsed ? "chevron-up" : "chevron-down"}
-              size={18}
-              color={Colors.textSecondary}
-            />
+                <View style={styles.grabber} />
+                <View style={styles.sheetHeaderRow}>
+                  <Text style={styles.sheetHeaderLabel}>ACTIONS</Text>
+                  {settings?.practice_mode ? (
+                    <View style={styles.practiceBadge} testID="practice-mode-badge">
+                      <Feather name="shield" size={9} color="#FFFFFF" />
+                      <Text style={styles.practiceBadgeText}>PRACTICE · 1 LOT</Text>
+                    </View>
+                  ) : null}
+                </View>
               </TouchableOpacity>
             </View>
           </GestureDetector>
@@ -689,6 +689,7 @@ export default function Home() {
               testID="actions-body"
               entering={FadeInDown.duration(220)}
               exiting={FadeOutDown.duration(180)}
+              style={styles.sheetBody}
             >
               <View style={styles.footerTop}>
                 <TouchableOpacity
@@ -1121,36 +1122,66 @@ const styles = StyleSheet.create({
   empty: { fontFamily: FONT, textAlign: "center", color: Colors.textMuted, marginTop: 16 },
   errorText: { fontFamily: FONT, color: Colors.dangerDark, textAlign: "center", marginTop: 16 },
 
-  footerWrap: { backgroundColor: Colors.bg },
-  footer: {
+  // Persistent bottom-sheet styling — gives the docked actions panel
+  // the same visual language as our floating BottomSheet modals: rounded
+  // top corners, grab handle, hairline divider, and an upward elevation
+  // shadow so the sheet "lifts" off the scroll content above.
+  sheetSafeBg: {
+    backgroundColor: "#FFFFFF",
+  },
+  sheetSurface: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    backgroundColor: "#FFF",
-    paddingHorizontal: 12,
+    borderColor: Colors.border,
+    paddingHorizontal: 18,
+    paddingBottom: 8,
+    // iOS shadow (above)
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: -3 },
+    // Android elevation
+    elevation: 12,
+  },
+  grabber: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#D6DDEA",
+    alignSelf: "center",
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  sheetHeader: {
     paddingBottom: 6,
   },
-  actionsHeader: {
+  sheetHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 4,
+    justifyContent: "center",
     gap: 10,
+    paddingBottom: 6,
   },
-  actionsHeaderLabel: {
+  sheetHeaderLabel: {
     fontFamily: FONT,
     fontSize: 11,
     fontWeight: "bold",
     color: Colors.textSecondary,
-    letterSpacing: 1.4,
+    letterSpacing: 1.6,
+  },
+  sheetBody: {
+    paddingTop: 6,
   },
   practiceBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     backgroundColor: Colors.primary,
-    paddingHorizontal: 7,
+    paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 4,
+    borderRadius: 999,
   },
   practiceBadgeText: {
     fontFamily: FONT,
@@ -1222,7 +1253,10 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     maxHeight: "70%",
   },
-  grabber: {
+  // Older grabber used inside the underlying-search modal sheet — kept
+  // distinct from the persistent ACTIONS sheet grabber so they can be
+  // restyled independently.
+  modalGrabber: {
     width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: "center", marginBottom: 16,
   },
   sheetTitle: { fontFamily: FONT, fontWeight: "bold", fontSize: 16, color: Colors.text },
