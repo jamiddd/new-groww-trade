@@ -113,6 +113,8 @@ export default function Home() {
   const [maxLossVisible, setMaxLossVisible] = useState(false);
   const [maxLossInput, setMaxLossInput] = useState("40000");
   const [expirySheetVisible, setExpirySheetVisible] = useState(false);
+  const expiryChipRef = useRef<View>(null);
+  const [expiryAnchor, setExpiryAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [confirmPreset, setConfirmPreset] = useState<PresetSummary | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [preview, setPreview] = useState<OrderPreview | null>(null);
@@ -537,8 +539,20 @@ export default function Home() {
           <Text style={styles.chipText}>{underlying}</Text>
         </TouchableOpacity>
         <TouchableOpacity
+          ref={expiryChipRef as any}
           style={styles.headerChipSecondary}
-          onPress={() => setExpirySheetVisible(true)}
+          onPress={() => {
+            const open = () => setExpirySheetVisible(true);
+            if (expiryChipRef.current && (expiryChipRef.current as any).measureInWindow) {
+              (expiryChipRef.current as any).measureInWindow((x: number, y: number, w: number, h: number) => {
+                setExpiryAnchor({ x, y, w, h });
+                open();
+              });
+            } else {
+              setExpiryAnchor(null);
+              open();
+            }
+          }}
           testID="header-expiry-button"
         >
           <Feather name="calendar" size={13} color={Colors.text} />
@@ -883,31 +897,82 @@ export default function Home() {
         </Pressable>
       </Modal>
 
-      {/* Expiry sheet */}
-      <BottomSheet
+      {/* Expiry popover */}
+      <Modal
         visible={expirySheetVisible}
-        onClose={() => setExpirySheetVisible(false)}
-        testID="expiry-sheet"
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExpirySheetVisible(false)}
       >
-        <Text style={styles.sheetTitle}>Select Expiry · {underlying}</Text>
-        {expiryList.length === 0 ? (
-          <Text style={styles.empty}>No expiries available.</Text>
-        ) : (
-          <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 8 }}>
-            {expiryList.map((e) => (
-              <TouchableOpacity
-                key={e}
-                style={styles.expiryRow}
-                onPress={() => onPickExpiry(e)}
-                testID={`expiry-row-${e}`}
+        <Pressable
+          style={styles.expiryBackdrop}
+          onPress={() => setExpirySheetVisible(false)}
+          testID="expiry-sheet"
+        >
+          <View
+            style={[
+              styles.expiryPopover,
+              {
+                top: (expiryAnchor ? expiryAnchor.y + expiryAnchor.h : 64) + 8,
+              },
+            ]}
+            // stop the press from bubbling to backdrop
+            onStartShouldSetResponder={() => true}
+          >
+            {expiryAnchor ? (
+              <View
+                style={[
+                  styles.expiryCaret,
+                  {
+                    left: Math.max(
+                      18,
+                      Math.min(
+                        expiryAnchor.x + expiryAnchor.w / 2 - 12 - 6,
+                        9999,
+                      ),
+                    ),
+                  },
+                ]}
+              />
+            ) : null}
+            {expiryList.length === 0 ? (
+              <Text style={[styles.empty, { paddingHorizontal: 12, paddingVertical: 8 }]}>
+                No expiries available.
+              </Text>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.expiryPillsRow}
               >
-                <Text style={styles.expiryText}>{formatExpiry(e)}</Text>
-                {expiry === e ? <Text style={styles.expiryCheck}>✓</Text> : null}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-      </BottomSheet>
+                {expiryList.map((e) => {
+                  const selected = expiry === e;
+                  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(e);
+                  const day = m ? m[3] : e.slice(0, 2);
+                  return (
+                    <TouchableOpacity
+                      key={e}
+                      onPress={() => onPickExpiry(e)}
+                      style={[styles.expiryPill, selected && styles.expiryPillActive]}
+                      testID={`expiry-row-${e}`}
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        style={[
+                          styles.expiryPillText,
+                          selected && styles.expiryPillTextActive,
+                        ]}
+                      >
+                        {day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* Max Loss prompt */}
       <BottomSheet
@@ -1362,6 +1427,60 @@ const styles = StyleSheet.create({
   },
   expiryText: { fontFamily: FONT, fontSize: 14, color: Colors.text, flex: 1 },
   expiryCheck: { fontFamily: FONT, color: Colors.primary, fontWeight: "bold" },
+
+  // Popover-style expiry selector (anchored under the header chip)
+  expiryBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.08)",
+  },
+  expiryPopover: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  expiryCaret: {
+    position: "absolute",
+    top: -6,
+    width: 12,
+    height: 12,
+    backgroundColor: "#FFFFFF",
+    transform: [{ rotate: "45deg" }],
+  },
+  expiryPillsRow: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    gap: 10,
+    alignItems: "center",
+  },
+  expiryPill: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EFEFEF",
+  },
+  expiryPillActive: {
+    backgroundColor: Colors.primary,
+  },
+  expiryPillText: {
+    fontFamily: FONT,
+    fontSize: 17,
+    fontWeight: "700",
+    color: Colors.text,
+  },
+  expiryPillTextActive: {
+    color: "#FFFFFF",
+  },
 
   toast: {
     position: "absolute",
