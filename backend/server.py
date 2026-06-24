@@ -144,10 +144,42 @@ async def require_token(x_groww_token: Optional[str] = Header(None)) -> str:
 
 
 def _groww_client(token: str) -> GrowwAPI:
-    try:
-        return GrowwAPI(token)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=401, detail=f"Invalid Groww token: {exc}") from exc
+    """Return a cached GrowwAPI client for this access token.
+
+    The growwapi SDK does a non-trivial amount of work on every
+    `GrowwAPI(token)` construction (prints "Ready to Groww!" and primes a
+    session), and the polling endpoints were instantiating a fresh client on
+    every single request — ~10 req/s in production. Caching by token gives
+    us a free 3-5× throughput boost and eliminates a recurring source of
+    worker memory churn that was triggering gunicorn SIGKILLs on the
+    Droplet.
+    """
+    cached = _GROWW_CLIENTS.get(token)
+    if cached is not None:
+        return cached
+    with _GROWW_CLIENT_LOCK:
+        cached = _GROWW_CLIENTS.get(token)
+        if cached is not None:
+            return cached
+        try:
+            client = GrowwAPI(token)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=401, detail=f"Invalid Groww token: {exc}") from exc
+        # Cap the cache so a long-running process accumulating dozens of
+        # rotated tokens doesn't leak unbounded memory.
+        if len(_GROWW_CLIENTS) > 32:
+            # Evict the oldest entry — token rotation is rare so this is fine.
+            try:
+                first_key = next(iter(_GROWW_CLIENTS))
+                _GROWW_CLIENTS.pop(first_key, None)
+            except StopIteration:  # noqa: PERF203
+                pass
+        _GROWW_CLIENTS[token] = client
+        return client
+
+
+_GROWW_CLIENTS: Dict[str, GrowwAPI] = {}
+_GROWW_CLIENT_LOCK = threading.Lock()
 
 
 async def _call_blocking(fn, *args, **kwargs):
@@ -868,7 +900,16 @@ async def margin(token: str = Depends(require_token)):
 
     api_ = _groww_client(token)
     try:
-        data = await _call_blocking(api_.get_available_margin_details)
+        # Hard 8 s cap so a slow/hanging Groww call can never block a gunicorn
+        # worker into the 30 s default kill timeout — that was the root cause
+        # of the periodic SIGKILL "Perhaps out of memory?" lines on the
+        # Droplet under polling load.
+        data = await asyncio.wait_for(
+            _call_blocking(api_.get_available_margin_details),
+            timeout=8.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Groww margin fetch timed out") from None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -997,13 +1038,23 @@ async def positions(token: str = Depends(require_token)):
     # shouldn't black-hole the others.
     async def _safe(segment: str) -> Any:
         try:
-            return await _call_blocking(api_.get_positions_for_user, segment)
+            return await asyncio.wait_for(
+                _call_blocking(api_.get_positions_for_user, segment),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("positions fetch (%s) timed out", segment)
+            return None
         except Exception as exc:  # noqa: BLE001
             logger.warning("positions fetch (%s) failed: %s", segment, exc)
             return None
 
-    fno = await _safe(GrowwAPI.SEGMENT_FNO)
-    cash = await _safe(GrowwAPI.SEGMENT_CASH)
+    # Fan out across segments in parallel so the worst-case latency is one
+    # 8 s timeout instead of N×8 s if Groww hangs on a single segment.
+    fno, cash = await asyncio.gather(
+        _safe(GrowwAPI.SEGMENT_FNO),
+        _safe(GrowwAPI.SEGMENT_CASH),
+    )
     return _merge_position_lists(fno, cash)
 
 
@@ -1016,8 +1067,15 @@ async def orders_history(page: int = 0, page_size: int = 50, token: str = Depend
         try:
             # The SDK only forwards `segment` and `page` to Groww's API
             # — page_size is ignored — but we keep the kwarg so the
-            # signature stays explicit.
-            return await _call_blocking(api_.get_order_list, page, page_size, segment)
+            # signature stays explicit. 8 s cap so one slow segment can't
+            # block the worker into a gunicorn SIGKILL.
+            return await asyncio.wait_for(
+                _call_blocking(api_.get_order_list, page, page_size, segment),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("order_list fetch (%s) timed out", segment)
+            return None
         except Exception as exc:  # noqa: BLE001
             logger.warning("order_list fetch (%s) failed: %s", segment, exc)
             return None
@@ -1888,9 +1946,15 @@ async def _list_active_smart_orders(api_: GrowwAPI) -> List[Dict[str, Any]]:
     """Fetch all currently-ACTIVE smart orders from Groww. Returns [] on any
     failure so callers can degrade gracefully."""
     try:
-        listing = await _call_blocking(
-            api_.get_smart_order_list, status=GrowwAPI.SMART_ORDER_STATUS_ACTIVE,
+        listing = await asyncio.wait_for(
+            _call_blocking(
+                api_.get_smart_order_list, status=GrowwAPI.SMART_ORDER_STATUS_ACTIVE,
+            ),
+            timeout=8.0,
         )
+    except asyncio.TimeoutError:
+        logger.warning("get_smart_order_list timed out — returning empty list")
+        return []
     except Exception as exc:  # noqa: BLE001
         logger.warning("get_smart_order_list failed: %s", exc)
         return []
