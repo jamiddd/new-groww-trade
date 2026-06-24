@@ -1,0 +1,33 @@
+{
+  "summary": "Iter23 backend retest PASSED. /api/instruments/option-chain demo regression from iter22 (502) is fixed: endpoint now returns 200 with the synthetic chain produced by _demo_option_chain(). Verified NIFTY spot=24700 with 13 strikes (step=50) bracketing ATM, both CE+PE legs carry trading_symbol/ltp/last_price/implied_volatility/gamma. Cross-checked BANKNIFTY spot=51100 with step=100. Burst of 5 concurrent demo GETs all returned 200 with wall=~13ms (no 5xx, no event-loop block). Full iter22 regression suite (underlyings, expiries, account/orders, place-preset dry_run, auth/server-ip, account/margin, account/positions) re-ran green. 11/11 pytest tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter23_option_chain_demo.py",
+    "/app/test_reports/pytest/iter23_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:1383 option-chain endpoint now correctly short-circuits via _is_demo(token) → _demo_option_chain() before touching GrowwAPI; mirrors the pattern used by other demo helpers (expiries, underlyings, margin, positions). Clean fix.",
+    "_demo_option_chain (server.py:488) produces a deterministic 13-row chain symmetric around the underlying-specific ATM (NIFTY=24700/50, BANKNIFTY=51100/100, FINNIFTY=23400/50, MIDCPNIFTY=12100/50, SENSEX=81500/100, BANKEX=58000/100). Matches ATM assumptions used elsewhere in the demo path.",
+    "server.py is now 2860 lines — recommend splitting demo helpers, option-chain caching, and Groww adapters into separate modules in a future iteration (file >>700 line guideline)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter22_perf_caching.py (added TestOptionChainDemoContent class with two content-validation tests for the iter23 fix)",
+    "/app/backend/tests/test_iter23_option_chain_demo.py (renamed/regression copy used for iter23 run)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "N/A — backend-only run"},
+  "seed_data_creation": "None. Demo token DEMO__SCALPX__TOKEN drives synthetic responses; no DB writes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reusable test files: /app/backend/tests/test_iter23_option_chain_demo.py (full iter22 perf suite + iter23 demo option-chain content tests) and /app/backend/tests/test_iter22_perf_caching.py (same content, kept for history). Backend on http://localhost:8001, demo header X-Groww-Token: DEMO__SCALPX__TOKEN. Live Groww mode remains MOCKED — only demo token paths exercised. Iter23 fix confirmed at server.py:1391-1392 (demo short-circuit) + server.py:488-535 (_demo_option_chain).",
+  "rca_of_issue": "Iter22 RCA: option_chain handler called _groww_client(token) unconditionally; with the demo token, that client raised at the first SDK call → FastAPI mapped the bubbled exception to 502 Bad Gateway. Iter23 mitigation added an `if _is_demo(token): return _demo_option_chain(...)` guard at the top of the handler, paralleling the existing demo branches for expiries/underlyings/margin/positions. Reproduction (pre-fix): `curl -s -o /dev/null -w '%{http_code}' 'http://localhost:8001/api/instruments/option-chain?underlying=NIFTY&expiry=2026-06-25&exchange=NSE&option_type=CE' -H 'X-Groww-Token: DEMO__SCALPX__TOKEN'` → 502. Post-fix → 200 with synthetic chain."
+}

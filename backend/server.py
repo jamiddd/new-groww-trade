@@ -485,6 +485,56 @@ async def _demo_margin_payload(token: str) -> Dict[str, Any]:
     }
 
 
+def _demo_option_chain(underlying: str, expiry: str, exchange: str = "NSE") -> Dict[str, Any]:
+    """Synthetic option chain for the demo token so the frontend can exercise
+    the option-chain endpoint without live Groww credentials. Mirrors the
+    ATM/step assumptions used by the demo place_preset_order path."""
+    atm_map = {
+        "NIFTY": 24700, "BANKNIFTY": 51100, "FINNIFTY": 23400,
+        "MIDCPNIFTY": 12100, "SENSEX": 81500, "BANKEX": 58000,
+    }
+    atm_step_map = {
+        "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
+        "MIDCPNIFTY": 50, "SENSEX": 100, "BANKEX": 100,
+    }
+    u = (underlying or "NIFTY").upper()
+    atm = atm_map.get(u, 1000)
+    step = atm_step_map.get(u, 50)
+    rows: List[Dict[str, Any]] = []
+    for i in range(-6, 7):
+        strike = atm + i * step
+        ce_intrinsic = max(0.0, atm - strike)
+        pe_intrinsic = max(0.0, strike - atm)
+        # Small deterministic-ish noise based on offset
+        ce_ltp = round(ce_intrinsic + max(5.0, 40.0 - abs(i) * 4) + (abs(i) * 0.1), 2)
+        pe_ltp = round(pe_intrinsic + max(5.0, 40.0 - abs(i) * 4) + (abs(i) * 0.1), 2)
+        rows.append({
+            "strike": strike,
+            "strike_price": strike,
+            "ce": {
+                "trading_symbol": f"{u}{strike}CE",
+                "last_price": ce_ltp,
+                "ltp": ce_ltp,
+                "implied_volatility": 14.0 + abs(i) * 0.3,
+                "gamma": round(max(0.0, 0.012 - abs(i) * 0.001), 4),
+            },
+            "pe": {
+                "trading_symbol": f"{u}{strike}PE",
+                "last_price": pe_ltp,
+                "ltp": pe_ltp,
+                "implied_volatility": 14.5 + abs(i) * 0.3,
+                "gamma": round(max(0.0, 0.012 - abs(i) * 0.001), 4),
+            },
+        })
+    return {
+        "underlying": u,
+        "exchange": exchange,
+        "expiry": expiry,
+        "spot": atm,
+        "option_chain": rows,
+    }
+
+
 def _demo_expiries(underlying: str = "NIFTY") -> Dict[str, Any]:
     """Return weekly + monthly expiries appropriate to the requested underlying.
 
@@ -1338,6 +1388,8 @@ async def option_chain(
     option_type: str = "CE",
     token: str = Depends(require_token),
 ):
+    if _is_demo(token):
+        return _demo_option_chain(underlying, expiry, exchange)
     api_ = _groww_client(token)
     try:
         data = await _get_option_chain_cached(api_, exchange, underlying, expiry)
