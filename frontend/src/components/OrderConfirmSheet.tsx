@@ -102,6 +102,33 @@ export default function OrderConfirmSheet({
               </Text>
             </View>
           ) : null}
+
+          {/* Hero entry-price block. For LIMIT we show the exact submitted
+              price; for MARKET we show LTP as the "approximate" entry. */}
+          {(() => {
+            const limitPx = isLimit ? Number(ord.price || 0) : 0;
+            const entryPx = limitPx > 0 ? limitPx : ltp;
+            if (!entryPx) return null;
+            return (
+              <View style={styles.heroPriceBlock}>
+                <Text style={styles.heroPriceLabel}>
+                  {isLimit ? "LIMIT BUY @" : "BUY (MARKET) ≈"}
+                </Text>
+                <Text style={styles.heroPriceValue} testID="entry-price">
+                  {formatMoney(entryPx)}
+                </Text>
+                {isLimit && ltp ? (
+                  <Text style={styles.heroPriceSub}>
+                    LTP {formatMoney(ltp)} ·{" "}
+                    <Text style={{ color: Colors.pnlNegative, fontWeight: "bold" }}>
+                      {((entryPx - ltp) / ltp * 100).toFixed(2)}%
+                    </Text>
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })()}
+
           <View style={styles.card}>
             <Row label="SYMBOL" value={sel.trading_symbol ?? "—"} bold />
             <Row label="STRIKE" value={sel.strike != null ? String(sel.strike) : "—"} />
@@ -234,6 +261,34 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 12,
     gap: 6,
+  },
+  heroPriceBlock: {
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 14,
+    alignItems: "center",
+  },
+  heroPriceLabel: {
+    fontFamily: FONT,
+    fontSize: 10,
+    color: "rgba(255,255,255,0.85)",
+    fontWeight: "bold",
+    letterSpacing: 1.4,
+    marginBottom: 4,
+  },
+  heroPriceValue: {
+    fontFamily: FONT,
+    fontSize: 28,
+    color: "#FFFFFF",
+    fontWeight: "900",
+    letterSpacing: 0.4,
+  },
+  heroPriceSub: {
+    fontFamily: FONT,
+    fontSize: 11,
+    color: "rgba(255,255,255,0.85)",
+    marginTop: 6,
   },
   cardLabel: {
     fontFamily: FONT,
