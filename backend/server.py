@@ -1474,7 +1474,7 @@ async def _candle_context_last_hour(
             api_.get_historical_candle_data,
             trading_symbol,
             exchange,
-            GrowwAPI.SEGMENT_FNO,
+            _segment_for(exchange),
             start_str,
             end_str,
             1,  # interval_in_minutes = 1
@@ -2413,16 +2413,22 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
         }
 
     api_ = _groww_client(token)
-    try:
-        pos_resp = await _call_blocking(api_.get_positions_for_user, GrowwAPI.SEGMENT_FNO)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
+    # Fetch positions across BOTH F&O and COMMODITY segments so MCX
+    # (GOLD/SILVER/CRUDEOIL/...) positions are also enumerable for exit.
     positions_list: List[Dict[str, Any]] = []
-    if isinstance(pos_resp, dict):
-        positions_list = pos_resp.get("positions") or pos_resp.get("data") or []
-    elif isinstance(pos_resp, list):
-        positions_list = pos_resp
+    seg_errors: List[str] = []
+    for seg in (GrowwAPI.SEGMENT_FNO, GrowwAPI.SEGMENT_COMMODITY):
+        try:
+            pos_resp = await _call_blocking(api_.get_positions_for_user, seg)
+        except Exception as exc:  # noqa: BLE001
+            seg_errors.append(f"{seg}: {exc}")
+            continue
+        if isinstance(pos_resp, dict):
+            positions_list += pos_resp.get("positions") or pos_resp.get("data") or []
+        elif isinstance(pos_resp, list):
+            positions_list += pos_resp
+    if not positions_list and seg_errors:
+        raise HTTPException(status_code=502, detail="; ".join(seg_errors))
 
     # First pass: figure out which positions match the filters, so we can
     # cancel their smart orders BEFORE we send the SELL — otherwise the
@@ -2467,7 +2473,7 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
                 GrowwAPI.ORDER_TYPE_MARKET,
                 GrowwAPI.PRODUCT_NRML,
                 qty_to_close,
-                GrowwAPI.SEGMENT_FNO,
+                _segment_for(exchange),
                 trading_symbol,
                 txn,
                 uuid.uuid4().hex[:18],

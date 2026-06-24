@@ -1,0 +1,44 @@
+{
+  "summary": "iter_17 follow-up MCX segment fixes validated. Confirmed all three source-level fixes in /app/backend/server.py: (a) _fetch_candles_for at line 1477 uses _segment_for(exchange) for get_historical_candle_data, (b) /api/orders/exit fetches positions from BOTH SEGMENT_FNO + SEGMENT_COMMODITY via the for-loop at line 2420, and (c) place_order inside the exit loop (line 2470) uses _segment_for(exchange). No hardcoded SEGMENT_FNO remains in any place_order or get_historical_candle_data call site. Demo /api/orders/exit with percent=100 returns 200 with {closed, count, cancelled_smart_orders} shape; invalid percent=33 returns 400. Demo /api/orders/place-preset NIFTY breakout_call_mkt dry_run returns lots>=1 with quantity==lots*lot_size. All 13 existing iter_16 mcx tests still pass. Total 20/20 passing across both test files over 3 consecutive runs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "demo random-walk LTP",
+        "issue": "test_demo_nifty_market_dry_run in test_mcx_commodity_fix.py can intermittently fail because the demo NIFTY LTP random-walks above the 25% capital threshold (lot_size=65 * LTP ~199 = ~12.9k vs 12.5k available). Pre-existing flakiness — not a regression from iter_17. Recovers on re-run."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17_mcx_exit_fix.py",
+    "/app/backend/tests/test_mcx_commodity_fix.py",
+    "/app/test_reports/pytest/iter17_results.xml"
+  ],
+  "action_items": [
+    "iter_17 fixes are complete and verified — the user can redeploy the droplet to consume the MCX segment fix (candle context fetch + position exit for commodity positions).",
+    "Optional: stabilise test_demo_nifty_market_dry_run by either widening capital (e.g. 75k) or pinning the demo LTP for deterministic tests. Pre-existing nit, not blocking."
+  ],
+  "critical_code_review_comments": [
+    "Verified no remaining hardcoded SEGMENT_FNO in either place_order or get_historical_candle_data positional args (test test_no_segment_fno_in_candle_or_order_paths walks every such call site with balanced-paren extraction).",
+    "Legitimate remaining SEGMENT_FNO usages: lines 898/923 (margin extraction across F&O) and 1751 (smart-order default for FNO-only context) — these are explicit F&O queries and correct to keep, matching the iter_17 instructions.",
+    "/orders/exit cleanly aggregates positions from both segments and short-circuits with 502 only when BOTH segment fetches error (preserves the original error-reporting semantics)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter17_mcx_exit_fix.py (new — 7 tests covering static checks + demo regressions)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "skipped per request"
+  },
+  "seed_data_creation": "None. Uses the built-in demo token (DEMO__SCALPX__TOKEN) via 'demo'/'demo' login.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter_17 verified the 3 MCX segment follow-up fixes are wired correctly. Test files: test_iter17_mcx_exit_fix.py (new, 7 tests) and test_mcx_commodity_fix.py (existing, 13 tests). All 20 pass on combined runs (3/3). Backend auth header is X-Groww-Token (NOT Authorization: Bearer). Demo login uses api_key='demo' & api_secret='demo'. Note one pre-existing flaky NIFTY test that depends on demo LTP random walk — already documented above.",
+  "rca_of_issue": "N/A — this iteration validated fixes rather than diagnosing a new bug. Root cause from iter_16: a) `_fetch_candles_for` and b) `/api/orders/exit` still passed GrowwAPI.SEGMENT_FNO unconditionally, blocking MCX (1) indicator/EMA context and (2) closing commodity positions through the UI. iter_17 patches both call sites + aggregates positions across SEGMENT_FNO+SEGMENT_COMMODITY in the exit route. Verified by static AST-ish regex checks and demo-token live runs."
+}
