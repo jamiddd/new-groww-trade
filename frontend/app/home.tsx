@@ -604,6 +604,13 @@ export default function Home() {
             activeOpacity={0.7}
           >
             <Text style={styles.actionsHeaderLabel}>ACTIONS</Text>
+            {settings?.practice_mode ? (
+              <View style={styles.practiceBadge} testID="practice-mode-badge">
+                <Feather name="shield" size={9} color="#FFFFFF" />
+                <Text style={styles.practiceBadgeText}>PRACTICE · 1 LOT</Text>
+              </View>
+            ) : null}
+            <View style={{ flex: 1 }} />
             <Feather
               name={actionsCollapsed ? "chevron-up" : "chevron-down"}
               size={18}
@@ -1059,9 +1066,9 @@ const styles = StyleSheet.create({
   actionsHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingVertical: 10,
     paddingHorizontal: 4,
+    gap: 10,
   },
   actionsHeaderLabel: {
     fontFamily: FONT,
@@ -1069,6 +1076,22 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: Colors.textSecondary,
     letterSpacing: 1.4,
+  },
+  practiceBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  practiceBadgeText: {
+    fontFamily: FONT,
+    fontSize: 9,
+    color: "#FFFFFF",
+    fontWeight: "bold",
+    letterSpacing: 0.6,
   },
   footerTop: {
     flexDirection: "row",
