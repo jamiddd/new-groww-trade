@@ -1,0 +1,1277 @@
+{
+  "version": "2026-06-25",
+  "items": [
+    {
+      "symbol": "NIFTY",
+      "name": "NIFTY 50",
+      "type": "INDEX",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BANKNIFTY",
+      "name": "BANK NIFTY",
+      "type": "INDEX",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "FINNIFTY",
+      "name": "FIN NIFTY",
+      "type": "INDEX",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MIDCPNIFTY",
+      "name": "MIDCAP NIFTY",
+      "type": "INDEX",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SENSEX",
+      "name": "SENSEX",
+      "type": "INDEX",
+      "exchange": "BSE"
+    },
+    {
+      "symbol": "BANKEX",
+      "name": "BANKEX",
+      "type": "INDEX",
+      "exchange": "BSE"
+    },
+    {
+      "symbol": "GOLD",
+      "name": "GOLD",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "GOLDM",
+      "name": "GOLD MINI",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "SILVER",
+      "name": "SILVER",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "SILVERM",
+      "name": "SILVER MINI",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "CRUDEOIL",
+      "name": "CRUDE OIL",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "CRUDEOILM",
+      "name": "CRUDE OIL MINI",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "NATURALGAS",
+      "name": "NATURAL GAS",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "NATGASMINI",
+      "name": "NATURAL GAS MINI",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "COPPER",
+      "name": "COPPER",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "ZINC",
+      "name": "ZINC",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "LEAD",
+      "name": "LEAD",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "NICKEL",
+      "name": "NICKEL",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "ALUMINIUM",
+      "name": "ALUMINIUM",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "COTTON",
+      "name": "COTTON",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "MENTHAOIL",
+      "name": "MENTHA OIL",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "CARDAMOM",
+      "name": "CARDAMOM",
+      "type": "COMMODITY",
+      "exchange": "MCX"
+    },
+    {
+      "symbol": "ABB",
+      "name": "ABB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ABBOTINDIA",
+      "name": "ABBOTINDIA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ABCAPITAL",
+      "name": "ABCAPITAL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ABFRL",
+      "name": "ABFRL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ACC",
+      "name": "ACC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ADANIENT",
+      "name": "ADANIENT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ADANIPORTS",
+      "name": "ADANIPORTS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ALKEM",
+      "name": "ALKEM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "AMBUJACEM",
+      "name": "AMBUJACEM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "APOLLOHOSP",
+      "name": "APOLLOHOSP",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "APOLLOTYRE",
+      "name": "APOLLOTYRE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ASHOKLEY",
+      "name": "ASHOKLEY",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ASIANPAINT",
+      "name": "ASIANPAINT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ASTRAL",
+      "name": "ASTRAL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ATUL",
+      "name": "ATUL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "AUBANK",
+      "name": "AUBANK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "AUROPHARMA",
+      "name": "AUROPHARMA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "AXISBANK",
+      "name": "AXISBANK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BAJAJ-AUTO",
+      "name": "BAJAJ-AUTO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BAJAJFINSV",
+      "name": "BAJAJFINSV",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BAJFINANCE",
+      "name": "BAJFINANCE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BALKRISIND",
+      "name": "BALKRISIND",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BANDHANBNK",
+      "name": "BANDHANBNK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BANKBARODA",
+      "name": "BANKBARODA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BATAINDIA",
+      "name": "BATAINDIA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BEL",
+      "name": "BEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BERGEPAINT",
+      "name": "BERGEPAINT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BHARATFORG",
+      "name": "BHARATFORG",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BHARTIARTL",
+      "name": "BHARTIARTL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BHEL",
+      "name": "BHEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BIOCON",
+      "name": "BIOCON",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BOSCHLTD",
+      "name": "BOSCHLTD",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BPCL",
+      "name": "BPCL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BRITANNIA",
+      "name": "BRITANNIA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BSE",
+      "name": "BSE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "BSOFT",
+      "name": "BSOFT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CANBK",
+      "name": "CANBK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CANFINHOME",
+      "name": "CANFINHOME",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CDSL",
+      "name": "CDSL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CHAMBLFERT",
+      "name": "CHAMBLFERT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CHOLAFIN",
+      "name": "CHOLAFIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CIPLA",
+      "name": "CIPLA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "COALINDIA",
+      "name": "COALINDIA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "COFORGE",
+      "name": "COFORGE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "COLPAL",
+      "name": "COLPAL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CONCOR",
+      "name": "CONCOR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "COROMANDEL",
+      "name": "COROMANDEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CROMPTON",
+      "name": "CROMPTON",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CUB",
+      "name": "CUB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "CUMMINSIND",
+      "name": "CUMMINSIND",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DABUR",
+      "name": "DABUR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DALBHARAT",
+      "name": "DALBHARAT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DEEPAKNTR",
+      "name": "DEEPAKNTR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DELHIVERY",
+      "name": "DELHIVERY",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DIVISLAB",
+      "name": "DIVISLAB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DIXON",
+      "name": "DIXON",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DLF",
+      "name": "DLF",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "DRREDDY",
+      "name": "DRREDDY",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "EICHERMOT",
+      "name": "EICHERMOT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ESCORTS",
+      "name": "ESCORTS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "EXIDEIND",
+      "name": "EXIDEIND",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "FEDERALBNK",
+      "name": "FEDERALBNK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GAIL",
+      "name": "GAIL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GLENMARK",
+      "name": "GLENMARK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GMRINFRA",
+      "name": "GMRINFRA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GNFC",
+      "name": "GNFC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GODREJCP",
+      "name": "GODREJCP",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GODREJPROP",
+      "name": "GODREJPROP",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GRANULES",
+      "name": "GRANULES",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "GRASIM",
+      "name": "GRASIM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HAL",
+      "name": "HAL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HAVELLS",
+      "name": "HAVELLS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HCLTECH",
+      "name": "HCLTECH",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HDFCAMC",
+      "name": "HDFCAMC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HDFCBANK",
+      "name": "HDFCBANK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HDFCLIFE",
+      "name": "HDFCLIFE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HEROMOTOCO",
+      "name": "HEROMOTOCO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HFCL",
+      "name": "HFCL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HINDALCO",
+      "name": "HINDALCO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HINDCOPPER",
+      "name": "HINDCOPPER",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HINDPETRO",
+      "name": "HINDPETRO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "HINDUNILVR",
+      "name": "HINDUNILVR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ICICIBANK",
+      "name": "ICICIBANK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ICICIGI",
+      "name": "ICICIGI",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ICICIPRULI",
+      "name": "ICICIPRULI",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IDEA",
+      "name": "IDEA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IDFCFIRSTB",
+      "name": "IDFCFIRSTB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IEX",
+      "name": "IEX",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IGL",
+      "name": "IGL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "INDHOTEL",
+      "name": "INDHOTEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "INDIAMART",
+      "name": "INDIAMART",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "INDIGO",
+      "name": "INDIGO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "INDUSINDBK",
+      "name": "INDUSINDBK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "INDUSTOWER",
+      "name": "INDUSTOWER",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "INFY",
+      "name": "INFY",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IOC",
+      "name": "IOC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IPCALAB",
+      "name": "IPCALAB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IRCTC",
+      "name": "IRCTC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "IRFC",
+      "name": "IRFC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ITC",
+      "name": "ITC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "JINDALSTEL",
+      "name": "JINDALSTEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "JIOFIN",
+      "name": "JIOFIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "JKCEMENT",
+      "name": "JKCEMENT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "JSL",
+      "name": "JSL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "JSWSTEEL",
+      "name": "JSWSTEEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "JUBLFOOD",
+      "name": "JUBLFOOD",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "KOTAKBANK",
+      "name": "KOTAKBANK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "L&TFH",
+      "name": "L&TFH",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LALPATHLAB",
+      "name": "LALPATHLAB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LAURUSLABS",
+      "name": "LAURUSLABS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LICHSGFIN",
+      "name": "LICHSGFIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LICI",
+      "name": "LICI",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LT",
+      "name": "LT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LTIM",
+      "name": "LTIM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LTTS",
+      "name": "LTTS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "LUPIN",
+      "name": "LUPIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "M&M",
+      "name": "M&M",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "M&MFIN",
+      "name": "M&MFIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MANAPPURAM",
+      "name": "MANAPPURAM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MARICO",
+      "name": "MARICO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MARUTI",
+      "name": "MARUTI",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MAXHEALTH",
+      "name": "MAXHEALTH",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MCX",
+      "name": "MCX",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "METROPOLIS",
+      "name": "METROPOLIS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MFSL",
+      "name": "MFSL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MGL",
+      "name": "MGL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MOTHERSON",
+      "name": "MOTHERSON",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MPHASIS",
+      "name": "MPHASIS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MRF",
+      "name": "MRF",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "MUTHOOTFIN",
+      "name": "MUTHOOTFIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "NATIONALUM",
+      "name": "NATIONALUM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "NAUKRI",
+      "name": "NAUKRI",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "NAVINFLUOR",
+      "name": "NAVINFLUOR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "NESTLEIND",
+      "name": "NESTLEIND",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "NMDC",
+      "name": "NMDC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "NTPC",
+      "name": "NTPC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "OBEROIRLTY",
+      "name": "OBEROIRLTY",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "OFSS",
+      "name": "OFSS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ONGC",
+      "name": "ONGC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PAGEIND",
+      "name": "PAGEIND",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PAYTM",
+      "name": "PAYTM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PEL",
+      "name": "PEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PERSISTENT",
+      "name": "PERSISTENT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PETRONET",
+      "name": "PETRONET",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PFC",
+      "name": "PFC",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PIDILITIND",
+      "name": "PIDILITIND",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PIIND",
+      "name": "PIIND",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PNB",
+      "name": "PNB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "POLICYBZR",
+      "name": "POLICYBZR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "POLYCAB",
+      "name": "POLYCAB",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "POWERGRID",
+      "name": "POWERGRID",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "PVRINOX",
+      "name": "PVRINOX",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "RAMCOCEM",
+      "name": "RAMCOCEM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "RBLBANK",
+      "name": "RBLBANK",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "RECLTD",
+      "name": "RECLTD",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "RELIANCE",
+      "name": "RELIANCE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SAIL",
+      "name": "SAIL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SBICARD",
+      "name": "SBICARD",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SBILIFE",
+      "name": "SBILIFE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SBIN",
+      "name": "SBIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SHREECEM",
+      "name": "SHREECEM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SHRIRAMFIN",
+      "name": "SHRIRAMFIN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SIEMENS",
+      "name": "SIEMENS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SRF",
+      "name": "SRF",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SUNPHARMA",
+      "name": "SUNPHARMA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SUNTV",
+      "name": "SUNTV",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "SYNGENE",
+      "name": "SYNGENE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TATACHEM",
+      "name": "TATACHEM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TATACOMM",
+      "name": "TATACOMM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TATACONSUM",
+      "name": "TATACONSUM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TATAMOTORS",
+      "name": "TATAMOTORS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TATAPOWER",
+      "name": "TATAPOWER",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TATASTEEL",
+      "name": "TATASTEEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TCS",
+      "name": "TCS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TECHM",
+      "name": "TECHM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TIINDIA",
+      "name": "TIINDIA",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TITAN",
+      "name": "TITAN",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TORNTPHARM",
+      "name": "TORNTPHARM",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TORNTPOWER",
+      "name": "TORNTPOWER",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TRENT",
+      "name": "TRENT",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "TVSMOTOR",
+      "name": "TVSMOTOR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "UBL",
+      "name": "UBL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ULTRACEMCO",
+      "name": "ULTRACEMCO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "UNITDSPR",
+      "name": "UNITDSPR",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "UPL",
+      "name": "UPL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "VEDL",
+      "name": "VEDL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "VOLTAS",
+      "name": "VOLTAS",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "WIPRO",
+      "name": "WIPRO",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ZEEL",
+      "name": "ZEEL",
+      "type": "STOCK",
+      "exchange": "NSE"
+    },
+    {
+      "symbol": "ZYDUSLIFE",
+      "name": "ZYDUSLIFE",
+      "type": "STOCK",
+      "exchange": "NSE"
+    }
+  ]
+}

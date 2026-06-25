@@ -12,9 +12,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { api } from "@/src/api/client";
 import { ColorPalette, FONT } from "@/src/theme";
 import { useTheme } from "@/src/theme/ThemeProvider";
+import { searchUnderlyings } from "@/src/data/underlyings";
 
 type UnderlyingItem = { symbol: string; name: string; type: string };
 
@@ -33,20 +33,19 @@ export default function UnderlyingSearchSheet({ visible, onPick, onClose }: Prop
 
   useEffect(() => {
     if (!visible) return;
-    let cancelled = false;
+    // Bundled JSON → instant client-side search. No API call, no spinner
+    // longer than a frame.
     setLoading(true);
-    const t = setTimeout(async () => {
+    const t = setTimeout(() => {
       try {
-        const res = await api.underlyings(q);
-        if (!cancelled) setItems(res.items);
+        setItems(searchUnderlyings(q));
       } catch {
-        if (!cancelled) setItems([]);
+        setItems([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
-    }, 200);
+    }, 0);
     return () => {
-      cancelled = true;
       clearTimeout(t);
     };
   }, [q, visible]);

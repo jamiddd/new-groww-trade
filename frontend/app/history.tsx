@@ -14,6 +14,7 @@ import { useRouter } from "expo-router";
 import { api } from "@/src/api/client";
 import { ColorPalette, FONT } from "@/src/theme";
 import { useTheme } from "@/src/theme/ThemeProvider";
+import { loadOrders, mergeOrders, newestOrderId } from "@/src/state/orderLog";
 
 type OrderRow = {
   order_id?: string;
@@ -64,9 +65,20 @@ export default function History() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await api.orders();
-      const list: OrderRow[] = res?.orders || res?.data || res?.items || (Array.isArray(res) ? res : []);
-      setOrders(list);
+      // 1. Render from local cache instantly.
+      const cached = await loadOrders();
+      if (cached.length) setOrders(cached as OrderRow[]);
+      // 2. Incremental delta from server — only orders newer than what we have.
+      const newest = newestOrderId(cached);
+      const res = await api.ordersSince(newest);
+      const delta: OrderRow[] = (res?.orders as any[]) || [];
+      if (delta.length) {
+        const merged = await mergeOrders(delta as any);
+        setOrders(merged as OrderRow[]);
+      } else if (!cached.length) {
+        // First-ever load and no delta? Treat the empty response as truth.
+        setOrders([]);
+      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load orders");
     }

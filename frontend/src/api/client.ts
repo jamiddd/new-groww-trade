@@ -125,6 +125,27 @@ export const api = {
   refreshCapital: () => req<{ ok: boolean }>("/account/refresh-capital", { method: "POST" }),
   positions: () => req<any>("/account/positions"),
   orders: () => req<any>("/account/orders"),
+  /** Bootstrap: single parallel fetch returning margin + positions + first
+   * page of orders + active smart orders. Called once on app open. */
+  bootstrap: () =>
+    req<{
+      margin: any;
+      positions: any;
+      orders: any;
+      smart_orders: any;
+      server_time: string;
+    }>("/bootstrap"),
+  /** Batch LTP — the only endpoint polled in steady state. */
+  ltpBatch: (items: { trading_symbol: string; exchange: string; segment?: string }[]) =>
+    req<{ ltps: Record<string, number> }>("/ltp/batch", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+  /** Incremental order sync — returns only orders newer than `after_id`. */
+  ordersSince: (after_id?: string) =>
+    req<{ orders: any[]; delta: boolean }>(
+      `/orders/since${after_id ? `?after_id=${encodeURIComponent(after_id)}` : ""}`,
+    ),
   smartOrders: () =>
     req<{
       items: {

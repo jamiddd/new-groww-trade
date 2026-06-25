@@ -146,7 +146,34 @@ backend:
         agent: "main"
         comment: "When the live instrument-master scan returns no expiries we now hit Groww's historical /get_expiries for (current_year, current_year+1) in parallel via asyncio.gather instead of serially."
 
-  - task: "Per-token response cache for polling endpoints (margin/positions/smart-orders)"
+  - task: "Client-driven architecture (Phase 1+2+3)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py, /app/frontend/**"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Major architecture shift to eliminate latency:
+          BACKEND:
+            * NEW /api/bootstrap — single parallel fetch (margin + positions + orders + smart_orders). Called once at app open.
+            * NEW POST /api/ltp/batch — fan-out LTP fetch (semaphore=6, 4s timeout/item). Only endpoint polled in steady state (1s for live positions, 1s for confirm dialog strike).
+            * NEW /api/orders/since?after_id= — incremental delta sync for the order log.
+          FRONTEND:
+            * /app/frontend/assets/underlyings.json — bundled 212 underlyings (indices + MCX + 190 F&O stocks). Search is now instant.
+            * src/utils/expiries.ts — SEBI-rule-based expiry computation in JS. NIFTY (Tue weekly), SENSEX (Thu weekly), monthly last-Thu (NSE) / last-Tue (BSE) / MCX-specific. Zero API calls.
+            * src/data/underlyings.ts — bundled-data lookup + search.
+            * src/utils/localStore.ts — AsyncStorage JSON wrapper.
+            * src/state/orderLog.ts — local order history with 30-day retention, dedupe by groww_order_id, newest-first sort.
+            * src/state/positionPnl.ts — client-side live P&L = (ltp - avg_price) * net_qty.
+            * src/hooks/useLtpPoller.ts — 1s LTP poller with auto-throttle to 2s on >5 symbols, AppState-aware (pauses in background).
+            * home.tsx — replaces 5s margin/positions/smart-orders polling with one bootstrap call + LTP poller. Hydrates from AsyncStorage for instant paint.
+            * history.tsx — renders from AsyncStorage instantly, delta-syncs via /orders/since.
+            * UnderlyingSearchSheet.tsx — now uses bundled JSON, no API.
+          Net result: steady-state API hit goes from ~3 reqs/5s (15+ Groww calls under burst) to ~1 batch req/s only when positions/dialog exist. Underlying search, expiry list, order history first paint = 0 ms (local).
     implemented: true
     working: "NA"
     file: "/app/backend/server.py"

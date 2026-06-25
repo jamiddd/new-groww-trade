@@ -1026,6 +1026,151 @@ async def refresh_capital(token: str = Depends(require_token)):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# Bootstrap — single parallel fetch for app startup
+# ---------------------------------------------------------------------------
+@api.get("/bootstrap")
+async def bootstrap(token: str = Depends(require_token)):
+    """Single endpoint the frontend calls ONCE at app open. Returns
+    margin + positions + first page of orders + active smart orders, all
+    fetched in parallel. Frontend then runs in a "client-driven" mode:
+      • client polls only /api/ltp/batch every second for live LTPs
+      • client computes positions P&L locally from {entry, ltp, qty}
+      • client appends to its local order book on each successful place
+    Net effect: ~1 Groww round-trip every 5 s (the LTP batch) instead of
+    ~3 round-trips every 5 s (margin+positions+smart-orders) — and ZERO
+    round-trips during steady-state navigation.
+    """
+    # Call the existing handlers in parallel — they each have their own
+    # short response cache so the bootstrap is cheap if the user
+    # bounces between login/home.
+    async def _safe_margin():
+        try:
+            return await margin(token=token)
+        except HTTPException as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    async def _safe_positions():
+        try:
+            return await positions(token=token)
+        except HTTPException as exc:
+            return {"positions": [], "error": exc.detail}
+
+    async def _safe_orders():
+        try:
+            return await orders_history(page=0, page_size=50, token=token)
+        except HTTPException as exc:
+            return {"orders": [], "error": exc.detail}
+
+    async def _safe_smart_orders():
+        try:
+            return await list_smart_orders(token=token)
+        except HTTPException as exc:
+            return {"items": [], "error": exc.detail}
+
+    m, p, o, so = await asyncio.gather(
+        _safe_margin(), _safe_positions(), _safe_orders(), _safe_smart_orders(),
+    )
+    return {
+        "margin": m,
+        "positions": p,
+        "orders": o,
+        "smart_orders": so,
+        "server_time": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Batch LTP — the only endpoint polled in steady state
+# ---------------------------------------------------------------------------
+class LtpQuery(BaseModel):
+    trading_symbol: str
+    exchange: str = "NSE"
+    # Optional override; defaults to FNO for indices/stocks, COMMODITY for MCX.
+    segment: Optional[str] = None
+
+
+class LtpBatchRequest(BaseModel):
+    items: List[LtpQuery]
+
+
+@api.post("/ltp/batch")
+async def ltp_batch(payload: LtpBatchRequest, token: str = Depends(require_token)):
+    """Fan-out LTP fetch for a list of trading symbols. Returns
+    `{trading_symbol: ltp}` keyed by the input symbol. Designed to be hit
+    every 1 s by the frontend while positions are open or the confirm
+    dialog is visible.
+    """
+    if not payload.items:
+        return {"ltps": {}}
+
+    # Demo mode: synthesize prices deterministically with a tiny random walk
+    # so the user can see P&L move in the UI even without live creds.
+    if _is_demo(token):
+        out: Dict[str, float] = {}
+        for q in payload.items:
+            # Seed the price by symbol hash so it's stable-ish across polls.
+            seed = sum(ord(c) for c in q.trading_symbol)
+            base = 50 + (seed % 250)
+            jitter = random.uniform(-1.5, 1.5)
+            out[q.trading_symbol] = round(base + jitter, 2)
+        return {"ltps": out}
+
+    api_ = _groww_client(token)
+
+    async def _one(q: LtpQuery) -> tuple:
+        sym = f"{q.exchange}_{q.trading_symbol}"
+        seg = q.segment or _segment_for(q.exchange)
+        try:
+            data = await asyncio.wait_for(
+                _call_blocking(api_.get_ltp, (sym,), seg),
+                timeout=4.0,
+            )
+            ltp = (
+                _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"])
+                or _first_positive_numeric(data)
+            )
+            return (q.trading_symbol, float(ltp) if ltp else 0.0)
+        except asyncio.TimeoutError:
+            logger.warning("ltp batch timeout for %s", q.trading_symbol)
+            return (q.trading_symbol, 0.0)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ltp batch failed %s: %s", q.trading_symbol, exc)
+            return (q.trading_symbol, 0.0)
+
+    # Fan out — Groww allows ~3 req/s, so cap concurrency at 6 to absorb
+    # bursts without tripping their rate limiter. semaphore is local.
+    semaphore = asyncio.Semaphore(6)
+
+    async def _bounded(q: LtpQuery):
+        async with semaphore:
+            return await _one(q)
+
+    pairs = await asyncio.gather(*(_bounded(q) for q in payload.items))
+    return {"ltps": dict(pairs)}
+
+
+# ---------------------------------------------------------------------------
+# Incremental orders — delta sync since a known order id
+# ---------------------------------------------------------------------------
+@api.get("/orders/since")
+async def orders_since(after_id: Optional[str] = None, token: str = Depends(require_token)):
+    """Return only the orders newer than `after_id`. Used by the frontend
+    to keep its local AsyncStorage order log in sync without re-downloading
+    the entire history on every pull-to-refresh."""
+    full = await orders_history(page=0, page_size=50, token=token)
+    orders_list: List[Dict[str, Any]] = full.get("orders", [])
+    if not after_id:
+        return {"orders": orders_list, "delta": False}
+    delta: List[Dict[str, Any]] = []
+    for o in orders_list:
+        oid = o.get("groww_order_id") or o.get("order_id") or o.get("id")
+        if oid == after_id:
+            break
+        delta.append(o)
+    return {"orders": delta, "delta": True}
+
+
 def _merge_position_lists(*sources: Any) -> Dict[str, Any]:
     """Concatenate position arrays from multiple Groww segment responses
     (FNO + CASH) into a single normalised payload."""

@@ -30,6 +30,11 @@ import { ColorPalette, FONT } from "@/src/theme";
 import { useTheme } from "@/src/theme/ThemeProvider";
 import { storage } from "@/src/utils/storage";
 import { formatExpiry } from "@/src/utils/format";
+import { loadJSON, saveJSON, STORAGE_KEYS } from "@/src/utils/localStore";
+import { mergeOrders } from "@/src/state/orderLog";
+import { applyLivePnl } from "@/src/state/positionPnl";
+import { useLtpPoller, type LtpQuery } from "@/src/hooks/useLtpPoller";
+import { computeExpiries } from "@/src/utils/expiries";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
 import OrderConfirmSheet, { OrderPreview } from "@/src/components/OrderConfirmSheet";
 import UnderlyingSearchSheet from "@/src/components/UnderlyingSearchSheet";
@@ -193,19 +198,11 @@ export default function Home() {
     })();
   }, []);
 
-  const loadExpiries = useCallback(async (u: string) => {
+  const loadExpiries = useCallback((u: string) => {
+    // Expiries computed deterministically from SEBI rules — no API call.
     try {
-      const exch = exchangeFor(u);
-      const res = await api.expiries(u, exch);
-      const raw: string[] = res?.expiries || res?.data || res?.items || [];
-      const todayIso = new Date().toISOString().slice(0, 10);
-      const exp = (Array.isArray(raw) ? raw : [])
-        .filter((d) => typeof d === "string" && d >= todayIso)
-        .sort();
+      const exp = computeExpiries(u);
       setExpiryList(exp);
-      // When "Always next closest expiry" is on, force exp[0] regardless
-      // of any prior selection. Otherwise: preserve the current pick if
-      // it is still valid (e.g. user manually chose a later expiry).
       if (alwaysNearestExpiry) {
         setExpiry(exp[0] ?? null);
       } else {
@@ -216,55 +213,90 @@ export default function Home() {
     }
   }, [alwaysNearestExpiry]);
 
-  const loadAll = useCallback(async () => {
-    setError(null);
-    try {
-      const [m, p, so] = await Promise.all([
-        api.margin(),
-        api.positions(),
-        api.smartOrders().catch(() => ({ items: [] })),
-      ]);
-      // Backend now exposes canonical fields:
-      //   m.available_margin     → live total trading balance (cash + used + collateral)
-      //   m.opening_capital_today → that same number snapshotted at start of day
-      // So PnL today = balance - capital, no extra arithmetic needed.
-      const liveTotal = Number(
-        m?.available_margin ??
-          m?.total_balance ??
-          // Last-resort fallback for old payload shapes:
-          (Number(m?.equity?.available_cash ?? m?.cash ?? 0) +
-            Number(m?.used_margin ?? 0)),
-      ) || 0;
-      const opening = Number(m?.opening_capital_today ?? liveTotal) || 0;
-      setBalance(liveTotal);
-      setCapital(opening);
-      const positionsList: Position[] =
-        p?.positions || p?.data || p?.items || (Array.isArray(p) ? p : []);
-      setPositions(positionsList.filter((x) => (x.net_quantity || x.quantity || 0) !== 0));
+  const applyMargin = useCallback((m: any) => {
+    const liveTotal = Number(
+      m?.available_margin ??
+        m?.total_balance ??
+        (Number(m?.equity?.available_cash ?? m?.cash ?? 0) +
+          Number(m?.used_margin ?? 0)),
+    ) || 0;
+    const opening = Number(m?.opening_capital_today ?? liveTotal) || 0;
+    setBalance(liveTotal);
+    setCapital(opening);
+  }, []);
 
-      // Index active smart orders by trading_symbol so each position row
-      // can light up its 🛡 protection badge in O(1).
-      const indexed: Record<string, {
-        smart_order_id: string;
-        smart_order_type: string;
-        tp_price?: number | string | null;
-        sl_price?: number | string | null;
-      }> = {};
-      for (const item of (so as any)?.items ?? []) {
-        if (item?.trading_symbol) {
-          indexed[item.trading_symbol] = {
-            smart_order_id: item.smart_order_id,
-            smart_order_type: item.smart_order_type,
-            tp_price: item.tp_price ?? null,
-            sl_price: item.sl_price ?? null,
-          };
-        }
+  const applyPositions = useCallback((p: any) => {
+    const list: Position[] =
+      p?.positions || p?.data || p?.items || (Array.isArray(p) ? p : []);
+    setPositions(list.filter((x) => (x.net_quantity || x.quantity || 0) !== 0));
+  }, []);
+
+  const applySmartOrders = useCallback((so: any) => {
+    const indexed: Record<string, {
+      smart_order_id: string;
+      smart_order_type: string;
+      tp_price?: number | string | null;
+      sl_price?: number | string | null;
+    }> = {};
+    for (const item of (so as any)?.items ?? []) {
+      if (item?.trading_symbol) {
+        indexed[item.trading_symbol] = {
+          smart_order_id: item.smart_order_id,
+          smart_order_type: item.smart_order_type,
+          tp_price: item.tp_price ?? null,
+          sl_price: item.sl_price ?? null,
+        };
       }
-      setSmartOrdersBySymbol(indexed);
+    }
+    setSmartOrdersBySymbol(indexed);
+  }, []);
+
+  const loadAll = useCallback(async (opts?: { fromCache?: boolean }) => {
+    setError(null);
+    const useCache = opts?.fromCache;
+
+    // 1. Hydrate from local cache instantly so the UI never shows a blank
+    //    state, even when the network is slow. Bootstrap then overlays
+    //    fresh server data on top.
+    if (useCache) {
+      try {
+        const cached = await loadJSON<{
+          margin?: any;
+          positions?: any;
+          smart_orders?: any;
+        } | null>(STORAGE_KEYS.bootstrap, null);
+        if (cached) {
+          if (cached.margin) applyMargin(cached.margin);
+          if (cached.positions) applyPositions(cached.positions);
+          if (cached.smart_orders) applySmartOrders(cached.smart_orders);
+        }
+      } catch {
+        // ignore — cache is best-effort
+      }
+    }
+
+    try {
+      // Single round-trip: margin + positions + orders + smart_orders.
+      const boot = await api.bootstrap();
+      applyMargin(boot.margin);
+      applyPositions(boot.positions);
+      applySmartOrders(boot.smart_orders);
+      // Persist for next launch so the UI is instant.
+      await saveJSON(STORAGE_KEYS.bootstrap, {
+        margin: boot.margin,
+        positions: boot.positions,
+        smart_orders: boot.smart_orders,
+        savedAt: Date.now(),
+      });
+      // Merge server order page into local order log (used by /history).
+      const serverOrders = (boot.orders?.orders ?? []) as any[];
+      if (Array.isArray(serverOrders) && serverOrders.length) {
+        await mergeOrders(serverOrders);
+      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load account data");
     }
-  }, []);
+  }, [applyMargin, applyPositions, applySmartOrders]);
 
   // Hold a stable ref to the in-flight `placing` flag so the polling
   // interval can skip refreshes during order placement without being torn
@@ -288,21 +320,18 @@ export default function Home() {
         } catch {
           // ignore — keep prior settings
         }
-        await loadAll();
+        // Hydrate from cache first (instant paint), then fetch bootstrap.
+        await loadAll({ fromCache: true });
         if (mounted) setLoading(false);
       })();
 
-      // Auto-refresh positions + margin every 5 s while the screen is
-      // focused. This is what surfaces live LTP / live P&L without the
-      // user needing to pull-to-refresh.
-      const poll = setInterval(() => {
-        if (!mounted || placingRef.current) return;
-        loadAll();
-      }, 5000);
+      // No more polling of margin/positions/smart-orders here — the LTP
+      // poller below drives live P&L by computing it client-side from the
+      // cached positions + the latest LTPs. The full bootstrap re-runs
+      // only on pull-to-refresh or after a state-mutating action (buy/exit).
 
       return () => {
         mounted = false;
-        clearInterval(poll);
       };
     }, [loadAll]),
   );
@@ -311,6 +340,34 @@ export default function Home() {
     if (underlying) loadExpiries(underlying);
   }, [underlying, loadExpiries]);
 
+  // Build the list of trading symbols whose LTP we need live.
+  // Currently: every open position's option. The order confirm dialog also
+  // adds its selected strike via `confirmLtpSymbol` below.
+  const positionLtpSymbols = useMemo<LtpQuery[]>(() => {
+    const out: LtpQuery[] = [];
+    for (const p of positions) {
+      const sym = p.trading_symbol || p.symbol;
+      if (!sym) continue;
+      out.push({
+        trading_symbol: sym,
+        exchange: (p as any).exchange || "NSE",
+        segment: (p as any).segment,
+      });
+    }
+    return out;
+  }, [positions]);
+
+  // Live LTP poll — only fires while there are open positions. Stops the
+  // second the list goes empty. This is the ONLY recurring API hit in
+  // steady state.
+  const { ltps: positionLtps } = useLtpPoller(positionLtpSymbols, { intervalMs: 1000 });
+
+  // Re-derive positions with live P&L every time LTPs tick.
+  const livePositions = useMemo(
+    () => applyLivePnl(positions as any, positionLtps),
+    [positions, positionLtps],
+  );
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadAll();
@@ -318,12 +375,8 @@ export default function Home() {
   };
 
   const totalPnl = useMemo(
-    () =>
-      positions.reduce(
-        (acc, p) => acc + (Number(p.pnl ?? p.unrealised_pnl ?? 0) || 0),
-        0,
-      ),
-    [positions],
+    () => livePositions.reduce((acc, p) => acc + (p.live_pnl || 0), 0),
+    [livePositions],
   );
 
   const showToast = (msg: string, type?: ToastType) => {
@@ -673,16 +726,16 @@ export default function Home() {
           <Text style={styles.errorText} testID="home-error">
             {error}
           </Text>
-        ) : positions.length === 0 ? (
+        ) : livePositions.length === 0 ? (
           <Text style={styles.empty}>No open positions.</Text>
         ) : (
-          positions.map((p, i) => {
-            const pnl = Number(p.pnl ?? p.unrealised_pnl ?? 0) || 0;
-            const qty = Number(p.net_quantity ?? p.quantity ?? 0);
-            const ap = Number(p.average_price ?? p.avg_price ?? 0);
-            const ltp = Number(p.ltp ?? p.last_price ?? 0);
-            const changePct = ap > 0 && ltp > 0 ? ((ltp - ap) / ap) * 100 : 0;
-            const sym = p.trading_symbol ?? p.symbol ?? "—";
+          livePositions.map((p, i) => {
+            const pnl = p.live_pnl;
+            const qty = p.net_quantity;
+            const ap = p.average_price;
+            const ltp = p.live_ltp;
+            const changePct = p.live_pnl_pct;
+            const sym = p.trading_symbol ?? (p as any).symbol ?? "—";
             const side = qty >= 0 ? "BUY" : "SELL";
             const protection = sym ? smartOrdersBySymbol[sym] : undefined;
             return (
