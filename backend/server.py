@@ -742,8 +742,10 @@ async def verify(token: str = Depends(require_token)):
         return {"ok": True, "profile": {"user_id": "demo", "name": "Demo User"}}
     api_ = _groww_client(token)
     try:
-        profile = await _call_blocking(api_.get_user_profile)
+        profile = await asyncio.wait_for(_call_blocking(api_.get_user_profile), timeout=6.0)
         return {"ok": True, "profile": profile}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Groww profile lookup timed out") from None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=401, detail=f"Token invalid: {exc}") from exc
 
@@ -1636,8 +1638,13 @@ async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(
 
         async def _hist_for_year(year: int):
             try:
-                data = await _call_blocking(api_.get_expiries, exchange, underlying, year)
+                data = await asyncio.wait_for(
+                    _call_blocking(api_.get_expiries, exchange, underlying, year),
+                    timeout=6.0,
+                )
                 return year, _extract_iso_dates(data), None
+            except asyncio.TimeoutError:
+                return year, [], "timed out after 6s"
             except Exception as exc:  # noqa: BLE001
                 return year, [], str(exc)
 
@@ -1832,7 +1839,10 @@ async def _fetch_spot_ltp(api_: GrowwAPI, underlying: str, exchange: str) -> flo
     ]
     for symbol, segment in candidates:
         try:
-            data = await _call_blocking(api_.get_ltp, (symbol,), segment)
+            data = await asyncio.wait_for(
+                _call_blocking(api_.get_ltp, (symbol,), segment),
+                timeout=4.0,
+            )
             # `get_ltp` returns `{symbol: ltp}` — the trading symbol IS the
             # key, so look for any positive numeric value.
             ltp = (
@@ -1842,18 +1852,26 @@ async def _fetch_spot_ltp(api_: GrowwAPI, underlying: str, exchange: str) -> flo
             if ltp and ltp > 0:
                 logger.info("spot ltp %s via %s/%s = %s", underlying, symbol, segment, ltp)
                 return float(ltp)
+        except asyncio.TimeoutError:
+            logger.warning("spot ltp %s/%s timed out (>4s)", symbol, segment)
+            continue
         except Exception as exc:  # noqa: BLE001
             logger.debug("spot ltp %s/%s failed: %s", symbol, segment, exc)
             continue
     # Final fallback: ask get_quote (richer payload).
     try:
-        data = await _call_blocking(api_.get_quote, underlying, exchange, "CASH")
+        data = await asyncio.wait_for(
+            _call_blocking(api_.get_quote, underlying, exchange, "CASH"),
+            timeout=4.0,
+        )
         ltp = (
             _find_numeric_by_keys(data, ["last_price", "ltp", "last_traded_price"])
             or _first_positive_numeric(data)
         )
         if ltp and ltp > 0:
             return float(ltp)
+    except asyncio.TimeoutError:
+        logger.warning("spot quote %s/%s timed out (>4s)", underlying, exchange)
     except Exception:  # noqa: BLE001
         pass
     return 0.0
@@ -1865,7 +1883,10 @@ async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) 
     # endpoints. Hardcoding "FNO" caused every commodity LTP fetch to 404.
     segment = _segment_for(exchange)
     try:
-        data = await _call_blocking(api_.get_ltp, (sym,), segment)
+        data = await asyncio.wait_for(
+            _call_blocking(api_.get_ltp, (sym,), segment),
+            timeout=4.0,
+        )
         ltp = (
             _find_numeric_by_keys(data, ["ltp", "last_price", "last_traded_price", "price"])
             or _first_positive_numeric(data)
@@ -1873,17 +1894,24 @@ async def _fetch_option_ltp(api_: GrowwAPI, exchange: str, trading_symbol: str) 
         if ltp and ltp > 0:
             logger.info("option ltp %s = %s (segment=%s)", trading_symbol, ltp, segment)
             return float(ltp)
+    except asyncio.TimeoutError:
+        logger.warning("option ltp %s timed out (>4s, segment=%s)", trading_symbol, segment)
     except Exception as exc:  # noqa: BLE001
         logger.debug("option ltp %s failed (segment=%s): %s", trading_symbol, segment, exc)
     # Fallback: get_quote
     try:
-        data = await _call_blocking(api_.get_quote, trading_symbol, exchange, segment)
+        data = await asyncio.wait_for(
+            _call_blocking(api_.get_quote, trading_symbol, exchange, segment),
+            timeout=4.0,
+        )
         ltp = (
             _find_numeric_by_keys(data, ["last_price", "ltp", "last_traded_price"])
             or _first_positive_numeric(data)
         )
         if ltp and ltp > 0:
             return float(ltp)
+    except asyncio.TimeoutError:
+        logger.warning("option quote %s timed out (>4s, segment=%s)", trading_symbol, segment)
     except Exception as exc:  # noqa: BLE001
         logger.debug("option quote %s failed (segment=%s): %s", trading_symbol, segment, exc)
     return 0.0
@@ -2947,7 +2975,13 @@ async def exit_positions(payload: ExitRequest, token: str = Depends(require_toke
     seg_errors: List[str] = []
     for seg in (GrowwAPI.SEGMENT_FNO, GrowwAPI.SEGMENT_COMMODITY):
         try:
-            pos_resp = await _call_blocking(api_.get_positions_for_user, seg)
+            pos_resp = await asyncio.wait_for(
+                _call_blocking(api_.get_positions_for_user, seg),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            seg_errors.append(f"{seg}: timed out (>8s)")
+            continue
         except Exception as exc:  # noqa: BLE001
             seg_errors.append(f"{seg}: {exc}")
             continue
