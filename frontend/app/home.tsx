@@ -37,6 +37,7 @@ import { applyLivePnl } from "@/src/state/positionPnl";
 import { useLtpPoller, type LtpQuery } from "@/src/hooks/useLtpPoller";
 import { computeExpiries } from "@/src/utils/expiries";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
+import InlineErrorBanner from "@/src/components/InlineErrorBanner";
 import OrderConfirmSheet, { OrderPreview } from "@/src/components/OrderConfirmSheet";
 import UnderlyingSearchSheet from "@/src/components/UnderlyingSearchSheet";
 import BottomSheet from "@/src/components/BottomSheet";
@@ -567,6 +568,9 @@ export default function Home() {
       }
 
       Alert.alert(title, body, [{ text: "OK" }]);
+      // Also push the human-readable summary to the inline error banner so
+      // the user can see what went wrong even after dismissing the Alert.
+      setError(`${title}: ${raw}`);
       // Keep the brief toast too so the user sees something fast — but
       // the dialog is the source of truth.
       showToast(`Failed: ${title}`);
@@ -713,6 +717,11 @@ export default function Home() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         testID="home-scroll-area"
       >
+        {/* Inline error banner — non-floating, user-dismissable, pushes
+            everything else below it down. Stays visible until the user
+            taps X (no auto-dismiss). */}
+        <InlineErrorBanner message={error} onDismiss={() => setError(null)} />
+
         {/* Account card */}
         <View style={styles.card}>
           <View style={styles.dotRow}>
@@ -771,10 +780,6 @@ export default function Home() {
 
         {loading ? (
           <ActivityIndicator color={Colors.primary} style={{ marginTop: 24 }} />
-        ) : error ? (
-          <Text style={styles.errorText} testID="home-error">
-            {error}
-          </Text>
         ) : livePositions.length === 0 ? (
           <Text style={styles.empty}>No open positions.</Text>
         ) : (
