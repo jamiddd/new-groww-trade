@@ -84,6 +84,23 @@ export default function Login() {
   const [serverIp, setServerIp] = useState<string | null>(defaultIp);
   const [ipCopied, setIpCopied] = useState(false);
 
+  // Host of EXPO_PUBLIC_BACKEND_URL — every API call (including order
+  // placement) goes through this. We surface it on the login screen so
+  // the user can immediately see whether their build is talking to the
+  // whitelisted droplet or, say, the preview pod (which would cause
+  // Groww to reject orders with "Request from unregistered IP").
+  const { backendHost, backendMatchesWhitelist } = useMemo(() => {
+    let host = "";
+    try {
+      host = new URL(process.env.EXPO_PUBLIC_BACKEND_URL ?? "").host || "(unset)";
+    } catch {
+      host = "(unset)";
+    }
+    const whitelistIp = process.env.EXPO_PUBLIC_GROWW_WHITELIST_IP?.trim() ?? "";
+    const matches = whitelistIp ? host.startsWith(whitelistIp) : true;
+    return { backendHost: host, backendMatchesWhitelist: matches };
+  }, []);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -421,6 +438,20 @@ export default function Login() {
             </TouchableOpacity>
           </View>
 
+          {/* Backend visibility — this is the host every order placement
+              will fly through. If it doesn't match the IP above, your
+              orders will hit Groww from a different (unwhitelisted) IP. */}
+          <View style={styles.backendChip} testID="backend-host-chip">
+            <Feather name="globe" size={12} color={Colors.textSecondary} />
+            <Text style={styles.backendChipLabel}>API:</Text>
+            <Text style={styles.backendChipValue}>{backendHost}</Text>
+            {!backendMatchesWhitelist ? (
+              <Text style={styles.backendChipWarn}>
+                ⚠ doesn{"\u2019"}t match whitelist IP — orders may be rejected
+              </Text>
+            ) : null}
+          </View>
+
           {/* Footer tip */}
           <Text style={styles.footnote}>
             Tip: try <Text style={styles.kbd}>demo</Text> / <Text style={styles.kbd}>demo</Text> to explore the UI without a real account.
@@ -667,6 +698,37 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
     borderRadius: 8,
   },
   ipText: { fontFamily: "Courier", fontWeight: "bold", color: Colors.warnIcon, fontSize: 14, letterSpacing: 1 },
+
+  backendChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: Colors.borderLight,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  backendChipLabel: {
+    fontFamily: FONT,
+    fontSize: 11,
+    color: Colors.textSecondary,
+    fontWeight: "bold",
+  },
+  backendChipValue: {
+    fontFamily: "Courier",
+    fontSize: 12,
+    color: Colors.text,
+    flexShrink: 1,
+  },
+  backendChipWarn: {
+    fontFamily: FONT,
+    fontSize: 11,
+    color: Colors.danger,
+    flexBasis: "100%",
+    marginTop: 2,
+  },
 
   footnote: {
     fontFamily: FONT,
