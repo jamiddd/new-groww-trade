@@ -159,6 +159,28 @@ export const api = {
     req<{ orders: any[]; delta: boolean }>(
       `/orders/since${after_id ? `?after_id=${encodeURIComponent(after_id)}` : ""}`,
     ),
+  /** One-shot underlying + expiry catalog. Hydrated into AsyncStorage at
+   * login so every browse flow afterwards is local. */
+  catalog: () =>
+    req<{
+      version: string;
+      underlyings: {
+        id: string;
+        displayName: string;
+        shortName: string;
+        ticker: string;
+        exchange: "NSE" | "BSE" | "MCX";
+        type: "INDEX" | "STOCK" | "COMMODITY";
+        lotSize: number | null;
+        tickSize: number | null;
+      }[];
+      expiries: {
+        underlyingObjectId: string;
+        date: string;
+        lotSize: number | null;
+        tickSize: number | null;
+      }[];
+    }>("/instruments/catalog"),
   smartOrders: () =>
     req<{
       items: {

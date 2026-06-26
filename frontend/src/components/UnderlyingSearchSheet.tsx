@@ -14,7 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ColorPalette, FONT } from "@/src/theme";
 import { useTheme } from "@/src/theme/ThemeProvider";
-import { searchUnderlyings } from "@/src/data/underlyings";
+import { searchUnderlyings as searchBundledUnderlyings } from "@/src/data/underlyings";
+import { selectUnderlyings as searchCatalog, isLoaded as isCatalogLoaded } from "@/src/state/catalog";
 
 type UnderlyingItem = { symbol: string; name: string; type: string };
 
@@ -38,7 +39,11 @@ export default function UnderlyingSearchSheet({ visible, onPick, onClose }: Prop
     setLoading(true);
     const t = setTimeout(() => {
       try {
-        setItems(searchUnderlyings(q));
+        // Prefer the master-derived catalog (synced at login). Bundled JSON
+        // remains a fallback for the rare case the catalog hasn't loaded
+        // yet (e.g. first-ever launch before hydrate completes).
+        const source = isCatalogLoaded() ? searchCatalog(q) : searchBundledUnderlyings(q);
+        setItems(source as UnderlyingItem[]);
       } catch {
         setItems([]);
       } finally {

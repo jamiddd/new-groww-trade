@@ -36,6 +36,14 @@ import { mergeOrders } from "@/src/state/orderLog";
 import { applyLivePnl } from "@/src/state/positionPnl";
 import { useLtpPoller, type LtpQuery } from "@/src/hooks/useLtpPoller";
 import { computeExpiries } from "@/src/utils/expiries";
+import {
+  loadFromDisk as loadCatalogFromDisk,
+  hydrateFromServer as hydrateCatalog,
+  isFreshToday as isCatalogFreshToday,
+  isLoaded as isCatalogLoaded,
+  selectExpiries,
+} from "@/src/state/catalog";
+import CatalogLoadingDialog from "@/src/components/CatalogLoadingDialog";
 import ConfirmSheet from "@/src/components/ConfirmSheet";
 import InlineErrorBanner from "@/src/components/InlineErrorBanner";
 import OrderConfirmSheet, { OrderPreview } from "@/src/components/OrderConfirmSheet";
@@ -112,6 +120,30 @@ export default function Home() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Catalog hydration state — when the user logs in for the very first time
+  // we show a full-screen blocking dialog while we fetch the underlying +
+  // expiry universe from /api/instruments/catalog. On subsequent launches
+  // we hydrate from AsyncStorage instantly, then silently background-sync
+  // if the calendar day has rolled over since the last sync.
+  const [catalogHydrating, setCatalogHydrating] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
+  const runCatalogHydrate = useCallback(async (opts?: { force?: boolean }) => {
+    setCatalogError(null);
+    setCatalogHydrating(true);
+    try {
+      await hydrateCatalog();
+      // Refresh expiry list for whatever underlying is currently selected
+      // so the UI picks up the freshly-synced expiries immediately.
+      if (underlying) loadExpiries(underlying);
+    } catch (e: any) {
+      setCatalogError(e?.message ?? "Couldn't sync instruments from Groww. Check your connection and retry.");
+      if (opts?.force) throw e;
+    } finally {
+      setCatalogHydrating(false);
+    }
+  }, [underlying, loadExpiries]);
   const [error, setError] = useState<string | null>(null);
 
   const [capital, setCapital] = useState(0);
@@ -201,9 +233,22 @@ export default function Home() {
   }, []);
 
   const loadExpiries = useCallback((u: string) => {
-    // Expiries computed deterministically from SEBI rules — no API call.
+    // Prefer the master-derived catalog (instrument-master rows from
+    // Groww) — this is the only correct source for MCX where SEBI's
+    // monthly rule isn't deterministic. Falls back to the static SEBI
+    // rule computation if the catalog hasn't loaded yet (e.g. during
+    // first-ever launch before the hydrate completes).
     try {
-      const exp = computeExpiries(u);
+      const exch = exchangeFor(u);
+      const u_id = `${exch}:${u}`;
+      const fromCatalog = selectExpiries(u_id);
+      let exp: string[];
+      if (isCatalogLoaded() && fromCatalog.length > 0) {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        exp = fromCatalog.map((e) => e.date).filter((d) => d >= todayIso);
+      } else {
+        exp = computeExpiries(u);
+      }
       setExpiryList(exp);
       if (alwaysNearestExpiry) {
         setExpiry(exp[0] ?? null);
@@ -322,6 +367,19 @@ export default function Home() {
         } catch {
           // ignore — keep prior settings
         }
+        // 1. Try the disk cache for instant paint of the underlying/expiry
+        //    catalog. No network on this path.
+        const cached = await loadCatalogFromDisk();
+        if (!mounted) return;
+        // 2. If we have no cache at all → mandatory hydrate behind a
+        //    full-screen dialog. If we have a cache but it's stale (last
+        //    synced before today) → background hydrate without blocking.
+        if (!cached) {
+          await runCatalogHydrate();
+        } else if (!isCatalogFreshToday()) {
+          // Fire-and-forget — don't await, don't block.
+          runCatalogHydrate().catch(() => {});
+        }
         // Hydrate from cache first (instant paint), then fetch bootstrap.
         await loadAll({ fromCache: true });
         if (mounted) setLoading(false);
@@ -335,7 +393,7 @@ export default function Home() {
       return () => {
         mounted = false;
       };
-    }, [loadAll]),
+    }, [loadAll, runCatalogHydrate]),
   );
 
   useEffect(() => {
@@ -1238,6 +1296,16 @@ export default function Home() {
           </Text>
         </Animated.View>
       ) : null}
+
+      {/* Catalog hydration overlay — non-dismissable, blocks the UI on
+          first-ever login or when the user manually forces a refresh.
+          Day-change background refreshes do NOT show this (they update
+          silently and the inline error banner will surface any failure). */}
+      <CatalogLoadingDialog
+        visible={catalogHydrating}
+        errorMessage={catalogError}
+        onRetry={() => runCatalogHydrate({ force: true }).catch(() => {})}
+      />
     </SafeAreaView>
   );
 }

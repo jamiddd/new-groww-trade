@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import pickle
+import pandas as pd
 import random
 import re
 import threading
@@ -1617,6 +1618,202 @@ async def instrument_master_debug(token: str = Depends(require_token)):
     }
 
 
+# ---------------------------------------------------------------------------
+# /instruments/catalog — single-shot snapshot used by the frontend to build
+# its local underlying/expiry database right after login.
+#
+# Schema (mirrors what the frontend persists in AsyncStorage):
+#
+#   underlyings: [
+#     {
+#       id,             # stable composite (`${exchange}:${ticker}`)
+#       displayName,    # human label (e.g. "CRUDE OIL MINI")
+#       shortName,      # short label (e.g. "CRUDEOILM")
+#       ticker,         # exact `underlying_symbol` from Groww (e.g. "CRUDEOILM")
+#       exchange,       # NSE | BSE | MCX
+#       type,           # INDEX | STOCK | COMMODITY
+#       lotSize,        # most-common lot size across this underlying's options
+#       tickSize,       # most-common tick size across this underlying's options
+#     }, ...
+#   ]
+#   expiries: [
+#     { underlyingObjectId, date, lotSize, tickSize }, ...   # sorted by date asc
+#   ]
+#   version: an opaque snapshot key (rowcount + max expiry) so the client can
+#            cheaply detect whether to re-hydrate on day-change.
+#
+# Source of truth: the cached instrument-master DataFrame
+# (`_load_instruments_async`). No Groww API round-trip in steady state.
+# ---------------------------------------------------------------------------
+
+def _mode_or_first(series) -> Any:
+    """Most-common value in a pandas Series, falling back to the first
+    non-null. Used to pick the canonical lot/tick when an underlying has
+    options with slightly differing values across expiries."""
+    try:
+        s = series.dropna()
+        if s.empty:
+            return None
+        m = s.mode()
+        if not m.empty:
+            return m.iloc[0]
+        return s.iloc[0]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _build_catalog_from_master(df) -> Dict[str, Any]:
+    """Pure function — no I/O. Given the master DataFrame, return the
+    catalog payload. Heavy lifting is pandas filtering."""
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    if df is None or len(df) == 0:
+        return {"underlyings": [], "expiries": [], "version": "empty"}
+
+    # Only options + their parents — we don't model futures here.
+    opt = df[df["instrument_type"].astype(str).str.upper().isin(["CE", "PE"])].copy()
+    opt["expiry_iso"] = opt["expiry_date"].astype(str).str.slice(0, 10)
+    opt = opt[opt["expiry_iso"] >= today_iso]
+    # Coerce lot/tick to numeric (master sometimes has them as strings).
+    for col in ("lot_size", "tick_size"):
+        if col in opt.columns:
+            opt[col] = pd.to_numeric(opt[col], errors="coerce")
+
+    underlyings_out: List[Dict[str, Any]] = []
+    expiries_out: List[Dict[str, Any]] = []
+
+    # Static label decorations (indices + MCX names). Anything not in here
+    # uses the ticker as both display+short name.
+    index_labels = {i["symbol"]: i for i in INDEX_UNDERLYINGS}
+    mcx_labels = {m["symbol"]: m for m in MCX_COMMODITIES}
+
+    # Group by (exchange, underlying_symbol).
+    grouped = opt.groupby(["exchange", "underlying_symbol"], dropna=True)
+    for (exch, ticker), rows in grouped:
+        if not ticker or pd.isna(ticker):
+            continue
+        ticker = str(ticker).strip()
+        if not ticker:
+            continue
+        exch = str(exch).upper()
+
+        u_id = f"{exch}:{ticker}"
+        u_lot = _mode_or_first(rows["lot_size"]) if "lot_size" in rows.columns else None
+        u_tick = _mode_or_first(rows["tick_size"]) if "tick_size" in rows.columns else None
+
+        # Determine the underlying TYPE.
+        if ticker in index_labels:
+            u_type = "INDEX"
+            display = index_labels[ticker].get("name") or ticker
+        elif ticker in mcx_labels:
+            u_type = "COMMODITY"
+            display = mcx_labels[ticker].get("name") or ticker
+        elif exch == "MCX":
+            u_type = "COMMODITY"
+            display = ticker
+        else:
+            u_type = "STOCK"
+            display = ticker
+
+        underlyings_out.append({
+            "id": u_id,
+            "displayName": display,
+            "shortName": ticker,
+            "ticker": ticker,
+            "exchange": exch,
+            "type": u_type,
+            "lotSize": int(u_lot) if pd.notna(u_lot) else None,
+            "tickSize": float(u_tick) if pd.notna(u_tick) else None,
+        })
+
+        # One row per unique expiry, with that expiry's per-row lot/tick mode.
+        for exp_iso, exp_rows in rows.groupby("expiry_iso"):
+            lot = _mode_or_first(exp_rows["lot_size"]) if "lot_size" in exp_rows.columns else None
+            tick = _mode_or_first(exp_rows["tick_size"]) if "tick_size" in exp_rows.columns else None
+            expiries_out.append({
+                "underlyingObjectId": u_id,
+                "date": exp_iso,
+                "lotSize": int(lot) if pd.notna(lot) else None,
+                "tickSize": float(tick) if pd.notna(tick) else None,
+            })
+
+    # Sort: underlyings by (type rank, ticker), expiries by (underlyingObjectId, date).
+    type_rank = {"INDEX": 0, "COMMODITY": 1, "STOCK": 2}
+    underlyings_out.sort(key=lambda u: (type_rank.get(u["type"], 99), u["ticker"]))
+    expiries_out.sort(key=lambda e: (e["underlyingObjectId"], e["date"]))
+
+    # Cheap version key — rowcount + max expiry. Stable across runs, changes
+    # when the master CSV changes or a day rolls over (and old expiries drop).
+    max_exp = max((e["date"] for e in expiries_out), default="0000-00-00")
+    version = f"r{len(opt)}-u{len(underlyings_out)}-e{len(expiries_out)}-{max_exp}"
+
+    return {
+        "underlyings": underlyings_out,
+        "expiries": expiries_out,
+        "version": version,
+    }
+
+
+def _demo_catalog() -> Dict[str, Any]:
+    """Synthetic catalog for the demo token. Mirrors the static client-side
+    expiry rules so the demo UI feels real even without live Groww creds."""
+    underlyings: List[Dict[str, Any]] = []
+    expiries: List[Dict[str, Any]] = []
+    for i in INDEX_UNDERLYINGS:
+        u_id = f"{i['exchange']}:{i['symbol']}"
+        underlyings.append({
+            "id": u_id,
+            "displayName": i["name"],
+            "shortName": i["symbol"],
+            "ticker": i["symbol"],
+            "exchange": i["exchange"],
+            "type": "INDEX",
+            "lotSize": INDEX_LOT_SIZES_2026.get(i["symbol"], 1),
+            "tickSize": 0.05,
+        })
+        for d in _demo_expiries(i["symbol"]).get("expiries", []):
+            expiries.append({
+                "underlyingObjectId": u_id,
+                "date": d,
+                "lotSize": INDEX_LOT_SIZES_2026.get(i["symbol"], 1),
+                "tickSize": 0.05,
+            })
+    for c in MCX_COMMODITIES:
+        u_id = f"MCX:{c['symbol']}"
+        # Plausible-looking demo values
+        lot = 100 if c["symbol"] in ("CRUDEOIL",) else 10 if c["symbol"].endswith("M") else 30
+        tick = 10.0 if c["symbol"].startswith("CRUDEOIL") else 1.0
+        underlyings.append({
+            "id": u_id, "displayName": c["name"], "shortName": c["symbol"],
+            "ticker": c["symbol"], "exchange": "MCX", "type": "COMMODITY",
+            "lotSize": lot, "tickSize": tick,
+        })
+        for d in _demo_expiries(c["symbol"]).get("expiries", []):
+            expiries.append({
+                "underlyingObjectId": u_id, "date": d,
+                "lotSize": lot, "tickSize": tick,
+            })
+    version = f"demo-{len(underlyings)}-{len(expiries)}"
+    return {"underlyings": underlyings, "expiries": expiries, "version": version}
+
+
+@api.get("/instruments/catalog")
+async def instruments_catalog(token: str = Depends(require_token)):
+    """One-shot snapshot of every option-bearing underlying + its future
+    expiry dates + canonical lot/tick. The frontend hydrates this into
+    AsyncStorage right after login and uses it to drive every selection
+    flow offline thereafter. Re-hydrate on a day-change or via the
+    "Get updated expiry dates" setting.
+    """
+    if _is_demo(token):
+        return _demo_catalog()
+    df = await _load_instruments_async(token)
+    # The build is pure pandas — offload to a thread so a slow master scan
+    # never blocks the event loop.
+    catalog = await asyncio.to_thread(_build_catalog_from_master, df)
+    return catalog
+
+
+
 @api.get("/instruments/expiries")
 async def expiries(underlying: str, exchange: str = "NSE", token: str = Depends(require_token)):
     if _is_demo(token):
@@ -2010,11 +2207,23 @@ async def _candle_context_last_hour(
     return out
 
 
-def _round_tick(price: float) -> float:
-    """Round a price to the nearest 0.05 — the standard Groww options tick."""
-    if price <= 0:
+def _round_tick(price: float, tick: float = 0.05) -> float:
+    """Round a price to the nearest exchange tick.
+
+    Default tick is 0.05 (NSE/BSE options). MCX commodity options have
+    much larger ticks — e.g. CRUDEOIL is ₹10, NATURALGAS is ₹0.10. Passing
+    the per-instrument `tick_size` (from the master DataFrame) is REQUIRED
+    for MCX orders to be accepted by Groww; sending 47.65 to a contract
+    that ticks in ₹10 increments is auto-rejected.
+    """
+    if price <= 0 or tick <= 0:
         return 0.0
-    return round(round(price * 20.0) / 20.0, 2)
+    # round(price/tick)*tick — works for both 0.05 and 10.0
+    n = round(price / tick)
+    rounded = n * tick
+    # Re-round to a sensible decimal precision based on the tick magnitude.
+    decimals = 0 if tick >= 1 else 2 if tick >= 0.05 else 4
+    return round(rounded, decimals)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -2065,10 +2274,10 @@ def _limit_offset_pct_for_expiry(expiry_str: str) -> float:
     return 7.0 if _is_zero_dte(expiry_str) else 3.0
 
 
-def _compute_sl_tp(entry_price: float, sl_pct: float, tp_pct: float) -> Dict[str, float]:
+def _compute_sl_tp(entry_price: float, sl_pct: float, tp_pct: float, tick: float = 0.05) -> Dict[str, float]:
     """Returns a {sl, tp} dict of rounded trigger prices. 0 means "not set"."""
-    sl = _round_tick(entry_price * (1 - sl_pct / 100.0)) if sl_pct > 0 and entry_price > 0 else 0.0
-    tp = _round_tick(entry_price * (1 + tp_pct / 100.0)) if tp_pct > 0 and entry_price > 0 else 0.0
+    sl = _round_tick(entry_price * (1 - sl_pct / 100.0), tick) if sl_pct > 0 and entry_price > 0 else 0.0
+    tp = _round_tick(entry_price * (1 + tp_pct / 100.0), tick) if tp_pct > 0 and entry_price > 0 else 0.0
     return {"sl": sl, "tp": tp}
 
 
@@ -2081,6 +2290,7 @@ async def _arm_protective_order(
     entry_price: float,
     sl_pct: float,
     tp_pct: float,
+    tick: float = 0.05,
 ) -> Optional[Dict[str, Any]]:
     """
     After a successful BUY, arm a protective Groww smart order so the position
@@ -2100,7 +2310,7 @@ async def _arm_protective_order(
     if sl_pct <= 0 and tp_pct <= 0:
         return None
 
-    levels = _compute_sl_tp(entry_price, sl_pct, tp_pct)
+    levels = _compute_sl_tp(entry_price, sl_pct, tp_pct, tick)
     sl_price, tp_price = levels["sl"], levels["tp"]
 
     common = dict(
@@ -2278,6 +2488,8 @@ def _fallback_pick_from_master(
         strike_col = cols.get("strike_price") or cols.get("strike")
         if not all([sym_col, underlying_col, type_col, expiry_col, strike_col]):
             return None
+        lot_col = cols.get("lot_size")
+        tick_col = cols.get("tick_size")
         sub = df[
             df[underlying_col].astype(str).str.upper().eq(u)
             & df[type_col].astype(str).str.upper().eq(opt)
@@ -2288,11 +2500,30 @@ def _fallback_pick_from_master(
         rows: List[Dict[str, Any]] = []
         for _, r in sub.iterrows():
             try:
-                rows.append({
+                row_out = {
                     "strike": float(r[strike_col]),
                     "trading_symbol": str(r[sym_col]),
                     "ltp": 0.0, "iv": 0.0, "gamma": 0.0,
-                })
+                }
+                # Carry per-instrument lot + tick so the order placement
+                # path can round the LIMIT price correctly (critical for
+                # MCX where tick_size is 10, not 0.05) and size the
+                # quantity in valid lot multiples.
+                if lot_col is not None:
+                    try:
+                        lv = float(r[lot_col])
+                        if lv > 0:
+                            row_out["lot_size"] = int(lv)
+                    except Exception:  # noqa: BLE001
+                        pass
+                if tick_col is not None:
+                    try:
+                        tv = float(r[tick_col])
+                        if tv > 0:
+                            row_out["tick_size"] = tv
+                    except Exception:  # noqa: BLE001
+                        pass
+                rows.append(row_out)
             except Exception:  # noqa: BLE001
                 continue
         if not rows:
@@ -2724,6 +2955,19 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         )
 
     order_type = preset_doc["order_type"]
+    # Use the master-row tick when we have it (critical for MCX: CRUDEOIL
+    # ticks in ₹10, not ₹0.05). Defaults to 0.05 for NSE/BSE options.
+    instrument_tick = float(pick.get("tick_size") or 0.05)
+    # And the master-row lot when we have it (CRUDEOIL=100, CRUDEOILM=10,
+    # SILVER=30 — none of these are in the index table). The existing
+    # _lot_size_for(...) was already called earlier as the fallback.
+    master_lot = pick.get("lot_size")
+    if isinstance(master_lot, (int, float)) and master_lot > 0:
+        # Re-derive quantity using the master lot so the order is a valid
+        # multiple of the contract's lot size on Groww.
+        lots = max(1, quantity // max(1, lot_size))
+        quantity = int(lots * int(master_lot))
+        lot_size = int(master_lot)
     price = 0.0
     if order_type == "LIMIT":
         # Sticky-price: when the frontend confirms the user pressed BUY on
@@ -2731,14 +2975,14 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         # executes at what the user actually saw (and not whatever LTP ×
         # offset evaluates to seconds later on the server side).
         if payload.limit_price_override and payload.limit_price_override > 0:
-            price = _round_tick(payload.limit_price_override)
+            price = _round_tick(payload.limit_price_override, instrument_tick)
         else:
             # LIMIT BUY is always placed BELOW LTP (we want a discount on
             # the entry). Offset is DTE-aware:
             #   0 DTE  → 7%  (faster decay, bid more aggressively)
             #   else   → 3%
             offset_pct = _limit_offset_pct_for_expiry(payload.expiry) / 100.0
-            price = _round_tick(pick["ltp"] * (1 - offset_pct))
+            price = _round_tick(pick["ltp"] * (1 - offset_pct), instrument_tick)
 
     order_payload = {
         "validity": GrowwAPI.VALIDITY_DAY,
@@ -2867,6 +3111,7 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
         entry_price=entry_for_protect,
         sl_pct=float(preset_doc.get("stop_loss_pct") or 0),
         tp_pct=float(preset_doc.get("take_profit_pct") or 0),
+        tick=instrument_tick,
     )
 
     # Log to mongo
