@@ -60,14 +60,19 @@ export default function Login() {
   const [autoLogin, setAutoLogin] = useState(false);
 
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
-  // The IP that needs to be whitelisted in Groww's Trading API console
-  // is the *backend's* public IP. Always derive this from
-  // EXPO_PUBLIC_BACKEND_URL — that's the host every order placement goes
-  // through, so it's guaranteed correct. We only fall back to the live
-  // /api/auth/server-ip endpoint when the env URL has no IPv4 literal
-  // (e.g. localhost dev). This prevents the helper text from briefly
-  // flashing whatever upstream IP the backend's egress hits (api.ipify.org).
+  // The IP that needs to be whitelisted in Groww's Trading API console.
+  // Priority order:
+  //   1. EXPO_PUBLIC_GROWW_WHITELIST_IP — explicit override, set in .env.
+  //      This is the one we trust because it's the actual outbound IP
+  //      that hits Groww's servers (the droplet that places orders).
+  //   2. EXPO_PUBLIC_BACKEND_URL host, if it's an IPv4 literal.
+  //   3. The live /api/auth/server-ip endpoint — last resort, only used
+  //      when neither override is set. (Otherwise we'd risk overwriting
+  //      the correct droplet IP with whatever upstream egress IP the
+  //      backend's outbound request to api.ipify.org happens to hit.)
   const defaultIp = (() => {
+    const explicit = process.env.EXPO_PUBLIC_GROWW_WHITELIST_IP?.trim();
+    if (explicit && /^\d+\.\d+\.\d+\.\d+$/.test(explicit)) return explicit;
     try {
       const raw = process.env.EXPO_PUBLIC_BACKEND_URL ?? "";
       const host = new URL(raw).hostname;
