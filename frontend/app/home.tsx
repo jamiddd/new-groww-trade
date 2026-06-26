@@ -11,6 +11,7 @@ import {
   Pressable,
   Switch,
   TextInput,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -520,7 +521,53 @@ export default function Home() {
       showToast(`Order sent: ${sym} × ${res?.quantity ?? "?"}`);
       await loadAll();
     } catch (e: any) {
-      showToast(`Failed: ${e?.message ?? "error"}`);
+      // A failed order is a high-impact event — money is on the line.
+      // Surface it with a persistent Alert that the user must dismiss,
+      // NOT a fleeting toast. Detect known recoverable cases (IP not
+      // whitelisted, expired token, market closed, insufficient margin)
+      // and tailor the title + body so the user knows what to do next.
+      const raw: string = e?.message ?? "Order failed for an unknown reason.";
+      const low = raw.toLowerCase();
+
+      let title = `Failed: ${preset.label}`;
+      let body = raw;
+
+      if (low.includes("unregistered ip") || low.includes("not whitelisted")) {
+        // Pull the IP out of the backend message if it's there, otherwise
+        // fall back to the configured whitelist IP from the env.
+        const m = raw.match(/(\d+\.\d+\.\d+\.\d+)/);
+        const ip = m?.[1] ?? process.env.EXPO_PUBLIC_GROWW_WHITELIST_IP ?? "your server IP";
+        title = "Server IP not whitelisted";
+        body =
+          `Groww rejected this order because the server's IP (${ip}) ` +
+          `isn't in your Trading API whitelist.\n\n` +
+          `Fix:\n` +
+          `  1. Open groww.in → Profile → Trading API → IP Restrictions\n` +
+          `  2. Add ${ip}\n` +
+          `  3. Re-login here, then retry the order.\n\n` +
+          `Tip: this happens automatically if you're testing through the ` +
+          `web preview — your phone build routes orders through your own ` +
+          `whitelisted Droplet, so it won't hit this on device.`;
+      } else if (low.includes("authentication failed") || low.includes("token has either expired") || low.includes("invalid token")) {
+        title = "Session expired";
+        body =
+          "Your Groww API session has expired or been revoked. " +
+          "Re-login from the menu to continue placing orders.";
+      } else if (low.includes("market is closed") || low.includes("market closed")) {
+        title = "Market closed";
+        body = "Orders can only be placed during market hours. Try again when the market opens.";
+      } else if (low.includes("insufficient")) {
+        title = "Insufficient funds";
+        body =
+          "Groww rejected this order because the available margin is " +
+          "below what this preset's position-sizing % requires.\n\n" +
+          raw;
+      }
+
+      Alert.alert(title, body, [{ text: "OK" }]);
+      // Keep the brief toast too so the user sees something fast — but
+      // the dialog is the source of truth.
+      showToast(`Failed: ${title}`);
     } finally {
       setPlacing(false);
     }
