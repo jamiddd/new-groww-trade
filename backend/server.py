@@ -2520,29 +2520,39 @@ async def place_preset_order(payload: PlacePresetOrderRequest, token: str = Depe
     # 2. Get option chain & underlying LTP
     chain_raw: Any = None
     chain_error: Optional[str] = None
-    try:
-        # Hard 6-second timeout on get_option_chain — for MCX commodities
-        # Groww's server frequently hangs before returning the "Underlying
-        # not found" error. Without this cap the whole dry-run can exceed
-        # the Cloudflare edge timeout (100s) and the user sees a 520.
-        # The cached wrapper also single-flights bursts of dry-runs.
-        chain_raw = await _get_option_chain_cached(
-            api_, payload.exchange, payload.underlying, payload.expiry
+    is_mcx = (payload.exchange or "").upper() == "MCX"
+    if is_mcx:
+        # Groww's get_option_chain API doesn't accept the bare MCX
+        # underlying symbols (CRUDEOIL, GOLD, SILVER, …) — it consistently
+        # returns "Underlying not found" and the call also counts against
+        # the API rate-limit. Skip it entirely and let the master-scan
+        # fallback below pick the strike off the cached instrument master.
+        chain_error = "mcx_skip_option_chain"
+        logger.debug(
+            "Skipping get_option_chain for MCX underlying %s — using master-scan fallback",
+            payload.underlying,
         )
-    except asyncio.TimeoutError:
-        chain_error = "option_chain_timeout"
-        logger.warning(
-            "Option chain fetch timed out (>6s) for %s/%s/%s — falling through to master-scan fallback",
-            payload.exchange, payload.underlying, payload.expiry,
-        )
-        if not payload.dry_run:
-            raise HTTPException(status_code=504, detail="Option chain fetch timed out — try again or use the MARKET preset.") from None
-    except Exception as exc:  # noqa: BLE001
-        chain_error = str(exc)
-        logger.warning("Option chain fetch failed: %s", exc)
-        if not payload.dry_run:
-            # For real orders, we still need a live LTP — bubble up.
-            raise HTTPException(status_code=502, detail=f"Option chain fetch failed: {exc}") from exc
+    else:
+        try:
+            # Hard 6-second timeout on get_option_chain — for non-MCX legs.
+            # The cached wrapper also single-flights bursts of dry-runs.
+            chain_raw = await _get_option_chain_cached(
+                api_, payload.exchange, payload.underlying, payload.expiry
+            )
+        except asyncio.TimeoutError:
+            chain_error = "option_chain_timeout"
+            logger.warning(
+                "Option chain fetch timed out (>6s) for %s/%s/%s — falling through to master-scan fallback",
+                payload.exchange, payload.underlying, payload.expiry,
+            )
+            if not payload.dry_run:
+                raise HTTPException(status_code=504, detail="Option chain fetch timed out — try again or use the MARKET preset.") from None
+        except Exception as exc:  # noqa: BLE001
+            chain_error = str(exc)
+            logger.warning("Option chain fetch failed: %s", exc)
+            if not payload.dry_run:
+                # For real orders, we still need a live LTP — bubble up.
+                raise HTTPException(status_code=502, detail=f"Option chain fetch failed: {exc}") from exc
 
     # Pull spot from chain payload (Groww returns it as `underlying_value` etc.)
     spot = 0.0

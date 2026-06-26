@@ -439,11 +439,13 @@ export default function Home() {
     [setActionsCollapsedPersistent],
   );
 
-  // Live LTP refresh inside the open confirmation dialog: every 3 s, while
+  // Live LTP refresh inside the open confirmation dialog: every 5 s, while
   // a preset is queued for confirmation and we're not actively placing the
   // order, re-run the dry-run so the displayed LTP / LIMIT-price / SL / TP
   // levels stay current. Otherwise the user would be looking at a frozen
-  // snapshot from when they tapped the button.
+  // snapshot from when they tapped the button. Bumped 3s → 5s to keep us
+  // safely under Groww's ~3 req/s limit while the LTP batch poller is
+  // also running.
   useEffect(() => {
     if (!confirmPreset) return;
     if (!expiry) return;
@@ -461,9 +463,9 @@ export default function Home() {
         })
         .then((res) => setPreview(res as OrderPreview))
         .catch(() => {
-          /* leave the previous preview on screen, don't toast every 3s */
+          /* leave the previous preview on screen, don't toast every 5s */
         });
-    }, 3000);
+    }, 5000);
     return () => clearInterval(id);
   }, [confirmPreset, expiry, underlying, optionType, capital, placing]);
 
