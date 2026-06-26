@@ -26,6 +26,16 @@ export type ColorPalette = {
   border: string;
   borderDark: string;
   pillBg: string;
+  // Status banner palette — used by the login info/warn boxes and any
+  // future inline alerts. Tokenised so we don't hardcode hexes that
+  // break in dark mode.
+  infoBg: string;
+  infoText: string;
+  infoIcon: string;
+  warnBg: string;
+  warnText: string;
+  warnIcon: string;
+  warnChipBg: string;
 };
 
 export const LightColors: ColorPalette = {
@@ -45,6 +55,13 @@ export const LightColors: ColorPalette = {
   border: "#E5E7EB",
   borderDark: "#9CA3AF",
   pillBg: "#F3F4F6",
+  infoBg: "#EEF2FF",
+  infoText: "#1E293B",
+  infoIcon: "#1E40AF",
+  warnBg: "#FEF3C7",
+  warnText: "#78350F",
+  warnIcon: "#B45309",
+  warnChipBg: "rgba(146,64,14,0.10)",
 };
 
 // OLED-black: pure black background so individual pixels stay off on
@@ -67,6 +84,16 @@ export const DarkColors: ColorPalette = {
   border: "#27272A",
   borderDark: "#52525B",
   pillBg: "#18181B",
+  // Dark-mode banners: keep the hue (indigo / amber) for at-a-glance
+  // recognition, but switch to a low-elevation translucent background
+  // and a bright foreground that passes WCAG AA on #0A0A0A.
+  infoBg: "rgba(79,138,255,0.12)",
+  infoText: "#C7D2FE",
+  infoIcon: "#93C5FD",
+  warnBg: "rgba(245,158,11,0.14)",
+  warnText: "#FCD34D",
+  warnIcon: "#FBBF24",
+  warnChipBg: "rgba(245,158,11,0.18)",
 };
 
 /**

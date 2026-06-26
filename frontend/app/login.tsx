@@ -60,10 +60,13 @@ export default function Login() {
   const [autoLogin, setAutoLogin] = useState(false);
 
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
-  // Fall back to the host of EXPO_PUBLIC_BACKEND_URL so users see the
-  // droplet's IP immediately even when the live /api/auth/server-ip call
-  // is blocked (e.g. the web preview's HTTPS → droplet HTTP mixed-content
-  // restriction). The API response, when it lands, overrides this.
+  // The IP that needs to be whitelisted in Groww's Trading API console
+  // is the *backend's* public IP. Always derive this from
+  // EXPO_PUBLIC_BACKEND_URL — that's the host every order placement goes
+  // through, so it's guaranteed correct. We only fall back to the live
+  // /api/auth/server-ip endpoint when the env URL has no IPv4 literal
+  // (e.g. localhost dev). This prevents the helper text from briefly
+  // flashing whatever upstream IP the backend's egress hits (api.ipify.org).
   const defaultIp = (() => {
     try {
       const raw = process.env.EXPO_PUBLIC_BACKEND_URL ?? "";
@@ -97,7 +100,13 @@ export default function Login() {
 
   useEffect(() => {
     refreshProfiles();
-    api.serverIp().then((r) => setServerIp(r.ip)).catch(() => setServerIp(null));
+    // Only fall back to /api/auth/server-ip when EXPO_PUBLIC_BACKEND_URL
+    // didn't already give us a literal IP — otherwise we'd risk
+    // overwriting the correct droplet IP with whatever upstream egress IP
+    // the backend's outbound request to api.ipify.org hits.
+    if (!defaultIp) {
+      api.serverIp().then((r) => setServerIp(r.ip)).catch(() => setServerIp(null));
+    }
     // Attempt auto-login from device-token profile
     (async () => {
       const lastId = await storage.getItem<string>("auto_login_profile_id", "" as string);
@@ -112,7 +121,7 @@ export default function Login() {
         }
       }
     })();
-  }, [refreshProfiles, router]);
+  }, [refreshProfiles, router, defaultIp]);
 
   const onConnect = async () => {
     if (!apiKey.trim() || !apiSecret.trim()) {
@@ -387,7 +396,7 @@ export default function Login() {
 
           {/* Info box */}
           <View style={styles.infoBox}>
-            <Feather name="shield" size={16} color={Colors.primaryDark} style={{ marginTop: 2 }} />
+            <Feather name="shield" size={16} color={Colors.infoIcon} style={{ marginTop: 2 }} />
             <Text style={styles.infoText}>
               <Text style={{ fontWeight: "bold" }}>The API Key + Secret flow</Text> needs daily approval on Groww{"\u2019"}s Cloud API Keys page. You also need an active Trading API subscription. Saved credentials are encrypted at rest with a server-side pepper plus your passphrase / device token — the server cannot decrypt them on its own.
             </Text>
@@ -396,14 +405,14 @@ export default function Login() {
           {/* IP whitelist warning */}
           <View style={styles.warnBox}>
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <Feather name="server" size={16} color="#92400E" style={{ marginTop: 2 }} />
+              <Feather name="server" size={16} color={Colors.warnIcon} style={{ marginTop: 2 }} />
               <Text style={styles.warnText}>
                 <Text style={{ fontWeight: "bold" }}>Required for live orders</Text>: whitelist this server{"\u2019"}s IP under <Text style={{ fontStyle: "italic" }}>groww.in → Profile → Trading API → IP Restrictions.</Text> Login & quotes work without it, but order placement is rejected if the IP isn{"\u2019"}t registered.
               </Text>
             </View>
             <TouchableOpacity onPress={copyIp} style={styles.ipChip} testID="server-ip-copy">
               <Text style={styles.ipText}>{serverIp ?? "—"}</Text>
-              <Feather name={ipCopied ? "check" : "copy"} size={14} color="#92400E" />
+              <Feather name={ipCopied ? "check" : "copy"} size={14} color={Colors.warnIcon} />
             </TouchableOpacity>
           </View>
 
@@ -628,31 +637,31 @@ const mkStyles = (Colors: ColorPalette) => StyleSheet.create({
   infoBox: {
     flexDirection: "row",
     gap: 10,
-    backgroundColor: "#EEF2FF",
+    backgroundColor: Colors.infoBg,
     borderRadius: 10,
     padding: 12,
     marginTop: 6,
   },
-  infoText: { flex: 1, fontFamily: FONT, fontSize: 12, color: "#1E293B", lineHeight: 18 },
+  infoText: { flex: 1, fontFamily: FONT, fontSize: 12, color: Colors.infoText, lineHeight: 18 },
 
   warnBox: {
-    backgroundColor: "#FEF3C7",
+    backgroundColor: Colors.warnBg,
     borderRadius: 10,
     padding: 12,
     marginTop: 6,
     gap: 10,
   },
-  warnText: { flex: 1, fontFamily: FONT, fontSize: 12, color: "#92400E", lineHeight: 18 },
+  warnText: { flex: 1, fontFamily: FONT, fontSize: 12, color: Colors.warnText, lineHeight: 18 },
   ipChip: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: "rgba(146,64,14,0.08)",
+    backgroundColor: Colors.warnChipBg,
     borderRadius: 8,
   },
-  ipText: { fontFamily: "Courier", fontWeight: "bold", color: "#92400E", fontSize: 14, letterSpacing: 1 },
+  ipText: { fontFamily: "Courier", fontWeight: "bold", color: Colors.warnIcon, fontSize: 14, letterSpacing: 1 },
 
   footnote: {
     fontFamily: FONT,
