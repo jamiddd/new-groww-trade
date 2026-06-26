@@ -84,20 +84,28 @@ export default function Login() {
   const [serverIp, setServerIp] = useState<string | null>(defaultIp);
   const [ipCopied, setIpCopied] = useState(false);
 
-  // Host of EXPO_PUBLIC_BACKEND_URL — every API call (including order
-  // placement) goes through this. We surface it on the login screen so
-  // the user can immediately see whether their build is talking to the
-  // whitelisted droplet or, say, the preview pod (which would cause
-  // Groww to reject orders with "Request from unregistered IP").
+  // Host of the backend the client.ts BASE actually resolves to at runtime —
+  // i.e. web → preview URL, native → Droplet URL. Surfacing this on the
+  // login screen lets the user confirm at a glance whether their build is
+  // talking to the whitelisted Droplet (required for live orders) vs the
+  // preview pod (works for testing but Groww will reject order placement).
   const { backendHost, backendMatchesWhitelist } = useMemo(() => {
+    const raw =
+      Platform.OS === "web"
+        ? process.env.EXPO_PUBLIC_BACKEND_URL ?? ""
+        : process.env.EXPO_PUBLIC_NATIVE_BACKEND_URL ??
+          process.env.EXPO_PUBLIC_BACKEND_URL ??
+          "";
     let host = "";
     try {
-      host = new URL(process.env.EXPO_PUBLIC_BACKEND_URL ?? "").host || "(unset)";
+      host = new URL(raw).host || "(unset)";
     } catch {
       host = "(unset)";
     }
     const whitelistIp = process.env.EXPO_PUBLIC_GROWW_WHITELIST_IP?.trim() ?? "";
-    const matches = whitelistIp ? host.startsWith(whitelistIp) : true;
+    // For native builds we want the chip to match the whitelist IP. On web
+    // it's expected to differ (preview pod), so don't show the red warning.
+    const matches = Platform.OS !== "web" && whitelistIp ? host.startsWith(whitelistIp) : true;
     return { backendHost: host, backendMatchesWhitelist: matches };
   }, []);
 

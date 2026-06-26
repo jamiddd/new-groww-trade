@@ -1,9 +1,22 @@
 /**
  * Shared API client and types.
  */
+import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL ?? "";
+// Pick the backend URL based on where the bundle is running.
+//   - Web preview (HTTPS) → EXPO_PUBLIC_BACKEND_URL (the preview pod). Using
+//     the user's HTTP Droplet here would trip the browser's mixed-content
+//     block and the preview would 502.
+//   - Native (iOS/Android) → EXPO_PUBLIC_NATIVE_BACKEND_URL (the Droplet).
+//     Phone apps have no mixed-content restriction and Groww only trusts
+//     this IP for live orders.
+const BASE =
+  Platform.OS === "web"
+    ? process.env.EXPO_PUBLIC_BACKEND_URL ?? ""
+    : process.env.EXPO_PUBLIC_NATIVE_BACKEND_URL ??
+      process.env.EXPO_PUBLIC_BACKEND_URL ??
+      "";
 
 export type Preset = {
   key: string;
